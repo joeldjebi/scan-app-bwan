@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Pass Parking — API application agents
-  version: 1.7.0
+  version: 1.7.1
   description: |
     API REST de l'application mobile des **agents parking** et des **chefs agent parking**.
 
@@ -655,6 +655,44 @@ paths:
 
         **20 véhicules par page** : chargez la suite avec `links.next` (`null` = fin).
         Filtres facultatifs : `event`, `from`, `to` (ex. `?from=2026-10-14&to=2026-10-14` pour une journée).
+
+        ### Affichage conseillé : liste de véhicules en accordéon
+
+        ```
+        ┌ Bandeau de cumul (summary) ────────────────────────────────┐
+        │  5 passages · 3 entrées · 1 sortie · 1 refus · 2 véhicules  │
+        └─────────────────────────────────────────────────────────────┘
+        ▸ ▌1234 VB 01      Toyota · Blanc        ● Dans le parking    ← ligne fermée
+          VIP · Festival de démonstration · 4 passages · 21h47
+        ▾ ▌5678 KD 01      Kia · Noir            ○ Dehors             ← ligne ouverte
+          VIP · Festival de démonstration · 2 passages · 20h12
+            ↓ Sortie   20h12   QR code                      📍 Carte
+            ↑ Entrée   18h03   Saisie manuelle  ⚠            📍 Carte
+        ▸ ▌QR codes inconnus                    1 refus
+        ```
+
+        **En-tête de chaque ligne (accordéon fermé)** — un élément de `data` :
+        | Zone | Champ |
+        |---|---|
+        | Barre de couleur à gauche | `pass.type.color` |
+        | Titre (grand, police à chasse fixe) | `vehicle.plate` (« QR codes inconnus » si `pass` est `null`) |
+        | Sous-titre | `vehicle.brand` · `vehicle.color` |
+        | Badge d'état | `pass.presence` : `in` → « Dans le parking » (vert), `out` → « Dehors » (gris) |
+        | Ligne d'informations | `pass.type.name` · `event.name` · `counts.total` passages · heure de `last_scanned_at` |
+        | Pastilles facultatives | `counts.denied` > 0 (rouge), `counts.manual` > 0 (violet « saisie manuelle ») |
+
+        **Contenu de la ligne ouverte** — la chronologie `scans` (déjà triée du plus récent au plus ancien) :
+        | Zone | Champ |
+        |---|---|
+        | Icône + libellé | `direction` : `in` → « ↑ Entrée », `out` → « ↓ Sortie » |
+        | Heure | `scanned_at` (afficher aussi la date si ce n'est pas aujourd'hui) |
+        | Mode | `method` : `qr` → « QR code », `plate` → « Saisie manuelle » |
+        | Résultat | `result = denied` → ligne rouge « Refusé » + `reason` ; `forced = true` → badge « Forcé » |
+        | Hors ligne | `offline = true` → petite icône « envoyé plus tard » |
+        | Lien carte | si `location` n'est pas `null` : `https://www.google.com/maps?q={latitude},{longitude}` |
+
+        Conseils : n'ouvrir qu'une ligne à la fois ; charger la page suivante (`links.next`) en fin de
+        défilement ; tirer pour rafraîchir ; filtre rapide « Aujourd'hui » = `?from=<date du jour>&to=<date du jour>`.
       parameters:
         - $ref: '#/components/parameters/Page'
         - name: event

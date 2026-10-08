@@ -51,3 +51,17 @@
 | `revoked` | Pass révoqué | oui |
 | `unknown_plate` | Immatriculation saisie inconnue sur mes événements | non |
 | `multiple_matches` | Immatriculation présente sur plusieurs de mes événements : choisir dans `matches`, puis renvoyer avec `code = matches[i].pass.token` | non |
+
+## Écran « Mon historique » (accordéon)
+
+`GET /scans/history` est prévu pour une **liste de véhicules en accordéon** :
+
+- **Bandeau du haut** : `summary`, c'est-à-dire le cumul des passages, entrées, sorties, refus et véhicules.
+- **Une ligne par véhicule** (`data[]`) :
+  - en-tête : `vehicle.plate` en grand, `brand` · `color`, la barre de couleur `pass.type.color`, le badge `pass.presence` (« Dans le parking » / « Dehors ») et `counts.total` passages · heure de `last_scanned_at` ;
+  - contenu une fois ouverte : la chronologie `scans` (« ↑ Entrée » / « ↓ Sortie », heure, « QR code » / « Saisie manuelle », refus ou passage forcé, lien carte si `location`).
+- **Groupe « QR codes inconnus »** quand `pass` vaut `null`.
+- **Pagination** : 20 véhicules par page (`links.next`). Filtre « Aujourd'hui » : `?from=AAAA-MM-JJ&to=AAAA-MM-JJ`.
+
+La maquette et la correspondance champ par champ sont dans le Swagger, rubrique `GET /scans/history`.
+
