@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Pass Parking — API application agents
-  version: 1.5.1
+  version: 1.5.2
   description: |
     API REST de l'application mobile des **agents parking** et des **chefs agent parking**.
 
@@ -71,6 +71,8 @@ info:
       `code = matches[i].pass.token`.
     - Chaque passage enregistre `method` (`qr` ou `plate`) : les saisies manuelles sont signalées
       dans les historiques et les statistiques du chef.
+    - Tolérance : une immatriculation envoyée par erreur dans `code` est reconnue comme une saisie
+      manuelle (`method = plate`). Préférez néanmoins `plate` pour une saisie manuelle.
 
     ## 4. Droits
 

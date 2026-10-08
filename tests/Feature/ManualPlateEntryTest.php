@@ -93,6 +93,23 @@ class ManualPlateEntryTest extends TestCase
         $this->postJson('/api/v1/scans', ['code' => $other->token])->assertCreated();
     }
 
+    public function test_plate_sent_in_code_field_is_treated_as_manual_entry(): void
+    {
+        $this->postJson('/api/v1/verify', ['code' => '1234 ab 01'])
+            ->assertJsonPath('valid', true)
+            ->assertJsonPath('method', 'plate')
+            ->assertJsonPath('pass.id', $this->pass->id);
+
+        $this->postJson('/api/v1/scans', ['code' => '1234AB01'])
+            ->assertCreated()
+            ->assertJsonPath('scan.method', 'plate');
+
+        // Ni QR code ni immatriculation connus : la réponse reste celle d'un QR code inconnu.
+        $this->postJson('/api/v1/verify', ['code' => '0000 XX 00'])
+            ->assertJsonPath('reason', 'unknown_pass')
+            ->assertJsonPath('method', 'qr');
+    }
+
     public function test_code_or_plate_is_required(): void
     {
         $this->postJson('/api/v1/verify', [])->assertJsonValidationErrors(['code', 'plate']);

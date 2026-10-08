@@ -56,14 +56,23 @@ class PassScanner
     }
 
     /**
-     * Identifie le pass à partir du QR code ou, à défaut, de l'immatriculation saisie.
+     * Identifie le pass à partir du QR code ou, à défaut, de l'immatriculation saisie
+     * (y compris une immatriculation envoyée par erreur dans `code`).
      *
      * @return array{outcome: ScanOutcome, method: ScanMethod, matches: Collection<int, Pass>}
      */
     public function resolve(User $user, ?string $code, ?string $plate): array
     {
         if ($code !== null && $code !== '') {
-            return ['outcome' => $this->check($user, $this->find($code)), 'method' => ScanMethod::Qr, 'matches' => collect()];
+            $pass = $this->find($code);
+
+            // Tolérance : une immatriculation envoyée par erreur dans `code` est traitée comme
+            // une saisie manuelle si elle correspond à un véhicule des événements de l'agent.
+            if ($pass === null && $this->findByPlate($user, $code)->isNotEmpty()) {
+                return $this->resolve($user, null, $code);
+            }
+
+            return ['outcome' => $this->check($user, $pass), 'method' => ScanMethod::Qr, 'matches' => collect()];
         }
 
         $matches = $this->findByPlate($user, (string) $plate);
