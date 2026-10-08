@@ -76,7 +76,7 @@
     @endif
     <div class="backdrop-shade" aria-hidden="true"></div>
 
-    <main class="relative mx-auto max-w-5xl px-4 pb-16 pt-6 sm:pt-10">
+    <main class="relative mx-auto max-w-5xl px-3 pb-16 pt-5 min-[360px]:px-4 sm:pt-10">
         {{-- En-tête --}}
         <header class="rise flex items-center justify-between gap-3" style="animation-delay: .05s">
             <div class="flex items-center gap-3">
@@ -85,14 +85,14 @@
                         <img src="{{ $event->logoUrl() }}" alt="{{ $event->name }}" class="max-h-full max-w-full object-contain">
                     </span>
                 @endif
-                <span class="text-sm font-semibold uppercase tracking-[.2em] text-white/80">Pass parking</span>
+                <span class="hidden text-sm font-semibold uppercase tracking-[.2em] text-white/80 min-[340px]:inline">Pass parking</span>
             </div>
             <span class="rounded-full px-3 py-1 text-xs font-bold uppercase tracking-wider shadow" style="background: {{ $pass->type->color }}; color: {{ \App\Services\PosterPalette::readableTextOn($pass->type->color) }}">{{ $pass->type->name }}</span>
         </header>
 
-        <div class="mt-8 grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:gap-12">
+        <div class="mt-6 grid min-w-0 items-start gap-6 sm:mt-8 sm:gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)] lg:gap-12">
             {{-- Événement --}}
-            <section class="text-white">
+            <section class="min-w-0 text-white">
                 @if ($event->posterUrl())
                     <div class="rise mx-auto mb-8 w-48 sm:w-60 lg:mx-0 lg:w-72" style="animation-delay: .15s; perspective: 900px"
                          x-data="{ rx: 0, ry: 0 }"
@@ -106,14 +106,14 @@
                     </div>
                 @endif
 
-                <h1 class="rise text-center text-3xl font-extrabold leading-tight tracking-tight sm:text-4xl lg:text-left lg:text-5xl" style="animation-delay: .25s">{{ $event->name }}</h1>
+                <h1 class="rise break-words text-center text-2xl font-extrabold leading-tight tracking-tight [hyphens:auto] min-[360px]:text-3xl sm:text-4xl lg:text-left lg:text-5xl" style="animation-delay: .25s">{{ $event->name }}</h1>
                 <div class="rise mt-4 flex flex-wrap justify-center gap-2 text-sm lg:justify-start" style="animation-delay: .35s">
-                    <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 backdrop-blur">
+                    <span class="inline-flex max-w-full items-center gap-1.5 rounded-2xl bg-white/15 px-3 py-1.5 text-left backdrop-blur">
                         <svg class="size-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M5.75 2a.75.75 0 0 1 .75.75V4h7V2.75a.75.75 0 0 1 1.5 0V4h.25A2.75 2.75 0 0 1 18 6.75v8.5A2.75 2.75 0 0 1 15.25 18H4.75A2.75 2.75 0 0 1 2 15.25v-8.5A2.75 2.75 0 0 1 4.75 4H5V2.75A.75.75 0 0 1 5.75 2Zm-1 5.5c-.69 0-1.25.56-1.25 1.25v6.5c0 .69.56 1.25 1.25 1.25h10.5c.69 0 1.25-.56 1.25-1.25v-6.5c0-.69-.56-1.25-1.25-1.25H4.75Z" clip-rule="evenodd"/></svg>
                         {{ ucfirst($event->periodLabel()) }}
                     </span>
                     @if ($event->location)
-                        <span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1.5 backdrop-blur">
+                        <span class="inline-flex max-w-full items-center gap-1.5 rounded-2xl bg-white/15 px-3 py-1.5 text-left backdrop-blur">
                             <svg class="size-4" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 18s6-5.33 6-10A6 6 0 0 0 4 8c0 4.67 6 10 6 10Zm0-7.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5Z" clip-rule="evenodd"/></svg>
                             {{ $event->location }}
                         </span>
@@ -125,19 +125,20 @@
             </section>
 
             {{-- Carte principale --}}
-            <section class="rise" style="animation-delay: .3s">
+            <section class="rise min-w-0" style="animation-delay: .3s">
                 <div class="glass overflow-hidden rounded-3xl">
                     {{-- Ticket --}}
-                    <div class="ticket relative px-6 pb-6 pt-5" style="background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: var(--on-brand)">
+                    <div class="ticket relative px-4 pb-5 pt-4 min-[360px]:px-6 min-[360px]:pb-6 min-[360px]:pt-5" style="background: linear-gradient(135deg, var(--brand), var(--brand-2)); color: var(--on-brand)">
                         <p class="text-xs font-semibold uppercase tracking-[.2em] opacity-80">Votre pass</p>
-                        <div class="mt-1 flex items-end justify-between gap-4">
-                            <p class="font-plate text-2xl tracking-wider sm:text-3xl">{{ $pass->number }}</p>
-                            <p class="text-right text-xs opacity-80">Valable pour toutes<br>vos entrées et sorties</p>
+                        <div class="mt-1 flex flex-wrap items-end justify-between gap-x-4 gap-y-1">
+                            {{-- Coupure uniquement après les tirets : « SINTELIGEND-VIP- » / « 0054 » --}}
+                            <p class="font-plate min-w-0 break-words text-xl tracking-wider min-[360px]:text-2xl sm:text-3xl">{!! str_replace('-', '-<wbr>', e($pass->number)) !!}</p>
+                            <p class="text-xs opacity-80 sm:text-right">Valable pour toutes<br>vos entrées et sorties</p>
                         </div>
-                        <div class="absolute inset-x-6 bottom-0 border-t-2 border-dashed border-white/40"></div>
+                        <div class="absolute inset-x-4 bottom-0 border-t-2 border-dashed border-white/40 min-[360px]:inset-x-6"></div>
                     </div>
 
-                    <div class="px-6 pb-7 pt-6">
+                    <div class="px-4 pb-6 pt-5 min-[360px]:px-6 min-[360px]:pb-7 min-[360px]:pt-6">
                         @if ($pass->status === PassStatus::Revoked)
                             <div class="flex items-start gap-3 rounded-2xl bg-red-50 p-4 text-red-800">
                                 <svg class="mt-0.5 size-5 shrink-0" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16ZM8.28 7.22a.75.75 0 0 0-1.06 1.06L8.94 10l-1.72 1.72a.75.75 0 1 0 1.06 1.06L10 11.06l1.72 1.72a.75.75 0 1 0 1.06-1.06L11.06 10l1.72-1.72a.75.75 0 0 0-1.06-1.06L10 8.94 8.28 7.22Z" clip-rule="evenodd"/></svg>
@@ -208,13 +209,28 @@
                                       customColor: @js($presetColor === 'Autre' ? $currentColor : ''),
                                       phone: @js(old('phone', '')),
                                       sending: false,
+                                      tried: false,
+                                      get missing() {
+                                          return {
+                                              plate: this.plate.trim().length < 2,
+                                              brand: this.brand.trim() === '',
+                                              color: this.colorValue === '',
+                                              phone: this.phone.replace(/\D/g, '').length < 8,
+                                          };
+                                      },
+                                      check(event) {
+                                          if (this.done === 4) { this.sending = true; return; }
+                                          event.preventDefault();
+                                          this.tried = true;
+                                          this.$nextTick(() => [...this.$el.querySelectorAll('[data-missing]')].find((el) => el.offsetParent)?.scrollIntoView({ block: 'center', behavior: 'smooth' }));
+                                      },
                                       colors: @js($colors),
                                       get colorValue() { return this.color === 'Autre' ? this.customColor.trim() : this.color; },
                                       get colorHex() { return this.colors[this.colorValue] ?? '#cbd5e1'; },
                                       get done() { return [this.plate.trim().length >= 2, this.brand.trim() !== '', this.colorValue !== '', this.phone.replace(/\D/g, '').length >= 8].filter(Boolean).length; },
                                   }"
                                   @brand-chosen="brand = $event.detail"
-                                  @submit="sending = true">
+                                  @submit="check($event)">
                                 @csrf
                                 <input type="hidden" name="color" :value="colorValue">
 
@@ -222,6 +238,7 @@
                                     <div>
                                         <h2 class="text-lg font-extrabold">Enregistrez votre véhicule</h2>
                                         <p class="text-sm text-slate-500">Moins d'une minute. Le pass sera lié à ce véhicule.</p>
+                                        <p class="mt-1 text-xs text-slate-500">Tous les champs sont obligatoires <span class="text-red-600" aria-hidden="true">*</span></p>
                                     </div>
                                     <span class="shrink-0 rounded-full px-2.5 py-1 text-xs font-bold text-brand bg-brand-soft"><span x-text="done">0</span>/4</span>
                                 </div>
@@ -240,10 +257,10 @@
                                 @endif
 
                                 {{-- Aperçu en direct --}}
-                                <div class="mt-6 flex items-center gap-4 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-4">
-                                    <div class="flex items-stretch overflow-hidden rounded-md border-2 border-slate-900 bg-white shadow-sm">
-                                        <span class="w-2" style="background: var(--brand)"></span>
-                                        <span class="font-plate min-w-[8.5rem] px-3 py-1.5 text-center text-lg tracking-[.12em] text-slate-900" x-text="plate.trim() ? plate.toUpperCase() : '•••• •• ••'"></span>
+                                <div class="mt-6 flex flex-wrap items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-3 min-[360px]:gap-4 min-[360px]:p-4">
+                                    <div class="flex max-w-full items-stretch overflow-hidden rounded-md border-2 border-slate-900 bg-white shadow-sm">
+                                        <span class="w-2 shrink-0" style="background: var(--brand)"></span>
+                                        <span class="font-plate min-w-[7rem] break-all px-3 py-1.5 text-center text-base tracking-[.12em] text-slate-900 min-[360px]:text-lg" x-text="plate.trim() ? plate.toUpperCase() : '•••• •• ••'"></span>
                                     </div>
                                     <div class="min-w-0 text-sm">
                                         <p class="truncate font-semibold" x-text="brand || 'Marque'" :class="!brand && 'text-slate-400'"></p>
@@ -259,11 +276,12 @@
                                     <div>
                                         <label for="plate" class="flex items-center gap-2 text-sm font-semibold">
                                             <span class="flex size-6 items-center justify-center rounded-full text-xs font-bold transition" :style="plate.trim().length >= 2 ? 'background: var(--brand); color: var(--on-brand)' : 'background: #f1f5f9; color: #64748b'">1</span>
-                                            Immatriculation
+                                            <span>Immatriculation <span class="text-red-600" aria-hidden="true">*</span><span class="sr-only">(obligatoire)</span></span>
                                         </label>
                                         <input id="plate" name="plate" type="text" x-model="plate" required maxlength="20" autocomplete="off" autocapitalize="characters" spellcheck="false"
                                                placeholder="Ex. 1234 AB 01"
-                                               class="ring-brand font-plate mt-2 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 text-xl uppercase tracking-[.12em] transition @error('plate') border-red-400 @enderror">
+                                               class="ring-brand font-plate mt-2 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3.5 text-lg uppercase tracking-[.12em] transition min-[360px]:text-xl @error('plate') border-red-400 @enderror" :class="tried && missing.plate && '!border-red-400'" aria-required="true">
+                                        <p x-show="tried && missing.plate" x-cloak data-missing class="mt-1.5 text-sm font-medium text-red-600" role="alert">L'immatriculation est obligatoire.</p>
                                         @error('plate') <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p> @enderror
                                     </div>
 
@@ -271,7 +289,7 @@
                                     <div>
                                         <label for="brand" class="flex items-center gap-2 text-sm font-semibold">
                                             <span class="flex size-6 items-center justify-center rounded-full text-xs font-bold transition" :style="brand.trim() ? 'background: var(--brand); color: var(--on-brand)' : 'background: #f1f5f9; color: #64748b'">2</span>
-                                            Marque du véhicule
+                                            <span>Marque du véhicule <span class="text-red-600" aria-hidden="true">*</span><span class="sr-only">(obligatoire)</span></span>
                                         </label>
                                         <div class="mt-2">
                                             @include('partials.brand-picker', [
@@ -283,6 +301,7 @@
                                                 'activeClass' => 'bg-brand-soft text-brand font-semibold',
                                             ])
                                         </div>
+                                        <p x-show="tried && missing.brand" x-cloak data-missing class="mt-1.5 text-sm font-medium text-red-600" role="alert">Choisissez la marque du véhicule.</p>
                                         @error('brand') <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p> @enderror
                                         @error('brand_other') <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p> @enderror
                                     </div>
@@ -291,9 +310,9 @@
                                     <div>
                                         <p id="color-label" class="flex items-center gap-2 text-sm font-semibold">
                                             <span class="flex size-6 items-center justify-center rounded-full text-xs font-bold transition" :style="colorValue ? 'background: var(--brand); color: var(--on-brand)' : 'background: #f1f5f9; color: #64748b'">3</span>
-                                            Couleur du véhicule
+                                            <span>Couleur du véhicule <span class="text-red-600" aria-hidden="true">*</span><span class="sr-only">(obligatoire)</span></span>
                                         </p>
-                                        <div class="mt-3 grid grid-cols-5 gap-3 sm:grid-cols-8" role="radiogroup" aria-labelledby="color-label">
+                                        <div class="mt-3 grid grid-cols-[repeat(auto-fill,minmax(3.25rem,1fr))] gap-x-2 gap-y-3" role="radiogroup" aria-labelledby="color-label" aria-required="true">
                                             @foreach ($colors as $name => $hex)
                                                 <button type="button" role="radio" :aria-checked="color === @js($name)" @click="color = @js($name)"
                                                         class="group flex flex-col items-center gap-1.5 focus:outline-none" title="{{ $name }}">
@@ -311,6 +330,7 @@
                                         </div>
                                         <input x-show="color === 'Autre'" x-cloak x-ref="customColor" type="text" x-model="customColor" maxlength="30" placeholder="Précisez la couleur"
                                                x-transition class="ring-brand mt-3 block w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-base">
+                                        <p x-show="tried && missing.color" x-cloak data-missing class="mt-1.5 text-sm font-medium text-red-600" role="alert">Choisissez la couleur du véhicule.</p>
                                         @error('color') <p class="mt-1.5 text-sm text-red-600">{{ $message }}</p> @enderror
                                     </div>
 
@@ -318,15 +338,16 @@
                                     <div>
                                         <label for="phone" class="flex items-center gap-2 text-sm font-semibold">
                                             <span class="flex size-6 items-center justify-center rounded-full text-xs font-bold transition" :style="phone.replace(/\D/g, '').length >= 8 ? 'background: var(--brand); color: var(--on-brand)' : 'background: #f1f5f9; color: #64748b'">4</span>
-                                            Numéro de téléphone
+                                            <span>Numéro de téléphone <span class="text-red-600" aria-hidden="true">*</span><span class="sr-only">(obligatoire)</span></span>
                                         </label>
                                         <div class="relative mt-2">
                                             <svg class="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-slate-400" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true"><path fill-rule="evenodd" d="M2 3.5A1.5 1.5 0 0 1 3.5 2h1.15a1.5 1.5 0 0 1 1.46 1.14l.57 2.29a1.5 1.5 0 0 1-.4 1.42l-.9.9a11.04 11.04 0 0 0 5.87 5.87l.9-.9a1.5 1.5 0 0 1 1.42-.4l2.29.57A1.5 1.5 0 0 1 18 15.35v1.15a1.5 1.5 0 0 1-1.5 1.5H15C7.82 18 2 12.18 2 5V3.5Z" clip-rule="evenodd"/></svg>
                                             <input id="phone" name="phone" type="tel" x-model="phone" required inputmode="tel" autocomplete="tel"
                                                    placeholder="Ex. +225 07 00 00 00 00"
-                                                   class="ring-brand block w-full rounded-xl border border-slate-300 bg-white py-3.5 pl-12 pr-4 text-base transition @error('phone') border-red-400 @enderror">
+                                                   class="ring-brand block w-full rounded-xl border border-slate-300 bg-white py-3.5 pl-12 pr-4 text-base transition @error('phone') border-red-400 @enderror" :class="tried && missing.phone && '!border-red-400'" aria-required="true">
                                         </div>
                                         <p class="mt-1.5 text-xs text-slate-500">Uniquement pour vous joindre en cas de besoin le jour de l'événement.</p>
+                                        <p x-show="tried && missing.phone" x-cloak data-missing class="mt-1.5 text-sm font-medium text-red-600" role="alert">Le numéro de téléphone est obligatoire (8 chiffres minimum).</p>
                                         @error('phone') <p class="mt-1 text-sm text-red-600">{{ $message }}</p> @enderror
                                     </div>
                                 </div>

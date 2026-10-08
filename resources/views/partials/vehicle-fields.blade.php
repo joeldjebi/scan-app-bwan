@@ -6,14 +6,14 @@
 @endphp
 <div class="space-y-4">
     <div>
-        <label for="plate" class="block text-sm font-medium text-slate-700">Immatriculation</label>
+        <label for="plate" class="block text-sm font-medium text-slate-700">Immatriculation <span class="text-red-600" aria-hidden="true">*</span></label>
         <input id="plate" name="plate" type="text" required maxlength="20" autocomplete="off" autocapitalize="characters"
                value="{{ old('plate', $vehicle?->plate) }}" placeholder="Ex. 1234 AB 01"
                class="{{ $input }} font-mono uppercase tracking-wider">
     </div>
 
     <div>
-        <label for="brand" class="block text-sm font-medium text-slate-700">Marque du véhicule</label>
+        <label for="brand" class="block text-sm font-medium text-slate-700">Marque du véhicule <span class="text-red-600" aria-hidden="true">*</span></label>
         @include('partials.brand-picker', [
             'current' => $currentBrand,
             'other' => $otherBrand,
@@ -25,7 +25,7 @@
     </div>
 
     <div>
-        <label for="color" class="block text-sm font-medium text-slate-700">Couleur du véhicule</label>
+        <label for="color" class="block text-sm font-medium text-slate-700">Couleur du véhicule <span class="text-red-600" aria-hidden="true">*</span></label>
         <input id="color" name="color" type="text" required maxlength="30" list="vehicle-colors"
                value="{{ old('color', $vehicle?->color) }}" placeholder="Ex. Blanc" class="{{ $input }}">
         <datalist id="vehicle-colors">
@@ -36,7 +36,7 @@
     </div>
 
     <div>
-        <label for="phone" class="block text-sm font-medium text-slate-700">Numéro de téléphone</label>
+        <label for="phone" class="block text-sm font-medium text-slate-700">Numéro de téléphone <span class="text-red-600" aria-hidden="true">*</span></label>
         <input id="phone" name="phone" type="tel" required inputmode="tel" autocomplete="tel"
                value="{{ old('phone', $vehicle?->phone) }}" placeholder="Ex. +225 07 00 00 00 00" class="{{ $input }}">
     </div>
