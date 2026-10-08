@@ -226,26 +226,44 @@ class ScanApiTest extends TestCase
         $this->assertSame(2, $pass->scans()->count());
     }
 
-    public function test_history_lists_only_my_scans(): void
+    public function test_history_returns_totals_and_groups_my_scans_by_vehicle(): void
     {
         $pass = $this->pass();
+        $other = $this->pass();
         Sanctum::actingAs($this->chief);
-        $this->postJson('/api/v1/scans', ['code' => $pass->token]);
+        $this->postJson('/api/v1/scans', ['code' => $pass->token]); // entrée par un autre agent
 
         Sanctum::actingAs($this->agent);
-        $this->postJson('/api/v1/scans', ['code' => $pass->token]);
+        $this->postJson('/api/v1/scans', ['code' => $pass->token]);            // sortie
+        $this->travel(1)->minutes();
+        $this->postJson('/api/v1/scans', ['plate' => $pass->vehicle->plate]); // entrée (saisie manuelle)
+        $this->travel(1)->minutes();
         $this->postJson('/api/v1/scans', ['code' => 'inconnu123456', 'result' => 'denied']);
+        $this->travel(1)->minutes();
+        $this->postJson('/api/v1/scans', ['code' => $other->token]);           // véhicule vu en dernier
 
-        $this->getJson('/api/v1/scans/history')
+        $response = $this->getJson('/api/v1/scans/history')
             ->assertOk()
-            ->assertJsonCount(2, 'data')
-            ->assertJsonPath('data.0.result', 'denied')
-            ->assertJsonPath('data.0.reason', 'unknown_pass')
-            ->assertJsonPath('data.0.pass', null)
-            ->assertJsonPath('data.1.direction', 'out')
-            ->assertJsonPath('data.1.pass.number', $pass->number)
-            ->assertJsonPath('data.1.pass.plate', $pass->vehicle->plate)
-            ->assertJsonPath('data.1.event.name', $this->event->name);
+            ->assertJsonPath('summary', ['total' => 4, 'entries' => 2, 'exits' => 1, 'denied' => 1, 'manual' => 1, 'vehicles' => 2])
+            ->assertJsonCount(3, 'data')
+            ->assertJsonPath('meta.total', 3);
+
+        // Du véhicule vu le plus récemment au plus ancien.
+        $response->assertJsonPath('data.0.pass.id', $other->id)
+            ->assertJsonPath('data.1.pass', null)
+            ->assertJsonPath('data.1.counts.denied', 1)
+            ->assertJsonPath('data.2.pass.number', $pass->number)
+            ->assertJsonPath('data.2.vehicle.plate', $pass->vehicle->plate)
+            ->assertJsonPath('data.2.event.name', $this->event->name)
+            ->assertJsonPath('data.2.counts', ['total' => 2, 'entries' => 1, 'exits' => 1, 'denied' => 0, 'manual' => 1])
+            ->assertJsonCount(2, 'data.2.scans')
+            ->assertJsonPath('data.2.scans.0.method', 'plate')
+            ->assertJsonPath('data.2.scans.0.direction', 'in')
+            ->assertJsonPath('data.2.scans.1.direction', 'out');
+
+        // Filtres : événement et période.
+        $this->getJson('/api/v1/scans/history?event='.$this->event->id)->assertJsonPath('summary.vehicles', 2)->assertJsonPath('summary.denied', 0);
+        $this->getJson('/api/v1/scans/history?from='.now()->addDay()->toDateString())->assertJsonPath('summary.total', 0)->assertJsonCount(0, 'data');
     }
 
     public function test_offline_batch_is_applied_in_order_and_idempotent(): void

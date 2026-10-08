@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\Direction;
+use App\Enums\ScanMethod;
 use App\Enums\ScanResult;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PassResource;
@@ -14,7 +15,6 @@ use App\Services\AuditLogger;
 use App\Services\PassScanner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
@@ -200,17 +200,115 @@ class ScanController extends Controller
     }
 
     /**
-     * Historique des passages effectués par l'utilisateur connecté.
+     * Historique de l'utilisateur connecté : cumul de ses passages et regroupement par véhicule
+     * (un élément par pass, du plus récemment vu au plus ancien). Les QR codes inconnus ou hors
+     * de ses événements forment un groupe sans pass.
      */
-    public function history(Request $request): AnonymousResourceCollection
+    public function history(Request $request): JsonResponse
     {
-        $scans = Scan::where('user_id', $request->user()->id)
-            ->with(['event', 'pass.type', 'pass.vehicle'])
+        $request->validate([
+            'event' => ['nullable', 'integer'],
+            'from' => ['nullable', 'date'],
+            'to' => ['nullable', 'date'],
+        ]);
+
+        $scans = fn () => Scan::query()
+            ->where('user_id', $request->user()->id)
+            ->when($request->event, fn ($query, $event) => $query->where('event_id', $event))
+            ->when($request->from, fn ($query, $from) => $query->where('scanned_at', '>=', Carbon::parse($from)->startOfDay()))
+            ->when($request->to, fn ($query, $to) => $query->where('scanned_at', '<=', Carbon::parse($to)->endOfDay()));
+
+        $counters = fn ($query) => $query
+            ->selectRaw('count(*) as total')
+            ->selectRaw('sum(case when result = ? and direction = ? then 1 else 0 end) as entries', [ScanResult::Granted->value, Direction::In->value])
+            ->selectRaw('sum(case when result = ? and direction = ? then 1 else 0 end) as exits', [ScanResult::Granted->value, Direction::Out->value])
+            ->selectRaw('sum(case when result = ? then 1 else 0 end) as denied', [ScanResult::Denied->value])
+            ->selectRaw('sum(case when method = ? then 1 else 0 end) as manual', [ScanMethod::Plate->value]);
+
+        $summary = $counters($scans()->toBase())->selectRaw('count(distinct pass_id) as vehicles')->first();
+
+        $groups = $counters($scans()->toBase()->select('pass_id'))
+            ->selectRaw('max(scanned_at) as last_scanned_at')
+            ->groupBy('pass_id')
+            ->orderByDesc('last_scanned_at')
+            ->paginate(20);
+
+        $passIds = collect($groups->items())->pluck('pass_id');
+        $passes = Pass::with(['type', 'vehicle', 'event'])->whereIn('id', $passIds->filter())->get()->keyBy('id');
+        $scansByPass = $scans()
+            ->where(fn ($query) => $query->whereIn('pass_id', $passIds->filter())
+                ->when($passIds->contains(null), fn ($sub) => $sub->orWhereNull('pass_id')))
             ->latest('scanned_at')
             ->latest('id')
-            ->paginate(30);
+            ->get()
+            ->groupBy(fn (Scan $scan) => (string) $scan->pass_id);
 
-        return ScanResource::collection($scans);
+        $vehicles = collect($groups->items())->map(function (object $group) use ($passes, $scansByPass) {
+            $pass = $group->pass_id ? $passes->get($group->pass_id) : null;
+
+            return [
+                'pass' => $pass ? [
+                    'id' => $pass->id,
+                    'number' => $pass->number,
+                    'status' => $pass->status,
+                    'presence' => $pass->presence,
+                    'type' => ['name' => $pass->type->name, 'color' => $pass->type->color],
+                ] : null,
+                'vehicle' => $pass?->vehicle ? [
+                    'plate' => $pass->vehicle->plate,
+                    'plate_key' => $pass->vehicle->plate_key,
+                    'brand' => $pass->vehicle->brand,
+                    'color' => $pass->vehicle->color,
+                ] : null,
+                'event' => $pass ? $pass->event->only(['id', 'name']) : null,
+                'counts' => self::counts($group),
+                'last_scanned_at' => Carbon::parse($group->last_scanned_at)->toISOString(),
+                'scans' => $scansByPass->get((string) $group->pass_id, collect())->map(fn (Scan $scan) => [
+                    'id' => $scan->id,
+                    'direction' => $scan->direction,
+                    'result' => $scan->result,
+                    'method' => $scan->method,
+                    'reason' => $scan->reason,
+                    'forced' => $scan->forced,
+                    'offline' => $scan->offline,
+                    'scanned_at' => $scan->scanned_at,
+                    'location' => $scan->hasLocation() ? [
+                        'latitude' => $scan->latitude,
+                        'longitude' => $scan->longitude,
+                        'accuracy' => $scan->location_accuracy,
+                    ] : null,
+                ])->values(),
+            ];
+        });
+
+        return response()->json([
+            'summary' => [...self::counts($summary), 'vehicles' => (int) $summary->vehicles],
+            'data' => $vehicles->values(),
+            'links' => [
+                'next' => $groups->nextPageUrl(),
+                'prev' => $groups->previousPageUrl(),
+            ],
+            'meta' => [
+                'current_page' => $groups->currentPage(),
+                'last_page' => $groups->lastPage(),
+                'per_page' => $groups->perPage(),
+                'total' => $groups->total(),
+            ],
+        ]);
+    }
+
+    /**
+     * @return array{total: int, entries: int, exits: int, denied: int, manual: int}
+     */
+    private static function counts(object $row): array
+    {
+        return [
+            'total' => (int) $row->total,
+            'entries' => (int) $row->entries,
+            'exits' => (int) $row->exits,
+            'denied' => (int) $row->denied,
+            'manual' => (int) $row->manual,
+        ];
     }
 
     /**

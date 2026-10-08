@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Pass Parking — API application agents
-  version: 1.6.1
+  version: 1.7.0
   description: |
     API REST de l'application mobile des **agents parking** et des **chefs agent parking**.
 
@@ -643,55 +643,93 @@ paths:
     get:
       tags: [Historique]
       operationId: myHistory
-      summary: Mon historique de passages
+      summary: Mon historique, regroupé par véhicule
       description: |
-        Passages effectués par **l'utilisateur connecté** (tous événements confondus), du plus récent
-        au plus ancien, **30 par page**. Chargez la page suivante avec `links.next` (`null` = fin).
+        Passages effectués par **l'utilisateur connecté**, avec :
+        - `summary` : le **cumul** de ses passages (total, entrées, sorties, refus, saisies manuelles)
+          et le nombre de véhicules différents ;
+        - `data` : **un élément par véhicule** (pass), du plus récemment vu au plus ancien, avec ses
+          compteurs, sa position actuelle et la liste de ses passages (du plus récent au plus ancien).
+          Les QR codes inconnus ou hors des événements de l'agent forment un groupe avec
+          `pass`, `vehicle` et `event` à `null`.
 
-        Chaque ligne indique le pass (numéro, immatriculation, type), l'événement, le sens, le résultat
-        et l'heure. `pass` et `event` sont `null` pour un QR code inconnu ou hors de vos événements.
+        **20 véhicules par page** : chargez la suite avec `links.next` (`null` = fin).
+        Filtres facultatifs : `event`, `from`, `to` (ex. `?from=2026-10-14&to=2026-10-14` pour une journée).
       parameters:
         - $ref: '#/components/parameters/Page'
+        - name: event
+          in: query
+          required: false
+          description: Limiter à un événement.
+          schema:
+            type: integer
+        - name: from
+          in: query
+          required: false
+          description: Depuis cette date (incluse), format AAAA-MM-JJ.
+          schema:
+            type: string
+            format: date
+        - name: to
+          in: query
+          required: false
+          description: Jusqu'à cette date (incluse), format AAAA-MM-JJ.
+          schema:
+            type: string
+            format: date
       responses:
         '200':
-          description: Page de l'historique.
+          description: Historique regroupé par véhicule.
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/PaginatedScans'
+                $ref: '#/components/schemas/VehicleHistory'
               example:
+                summary: { total: 5, entries: 3, exits: 1, denied: 1, manual: 1, vehicles: 2 }
                 data:
-                  - *ScanEntry
-                  - id: 11
-                    client_uuid: null
-                    direction: in
-                    result: denied
-                    method: qr
-                    reason: unknown_pass
-                    forced: false
-                    offline: false
-                    scanned_at: '2026-10-14T18:01:40.000000Z'
-                    location: null
+                  - pass:
+                      id: 1
+                      number: DEMO26-VIP-0001
+                      status: registered
+                      presence: in
+                      type: { name: VIP, color: '#b45309' }
+                    vehicle: { plate: 1234 VB 01, plate_key: 1234VB01, brand: Toyota, color: Blanc }
+                    event: { id: 1, name: Festival de démonstration }
+                    counts: { total: 4, entries: 3, exits: 1, denied: 0, manual: 1 }
+                    last_scanned_at: '2026-10-14T21:47:05.000000Z'
+                    scans:
+                      - id: 18
+                        direction: in
+                        result: granted
+                        method: plate
+                        reason: null
+                        forced: false
+                        offline: false
+                        scanned_at: '2026-10-14T21:47:05.000000Z'
+                        location: { latitude: 5.3197012, longitude: -4.0167293, accuracy: 12 }
+                  - pass: null
+                    vehicle: null
                     event: null
-                    pass: null
-                links:
-                  first: https://pass.exemple.com/api/v1/scans/history?page=1
-                  last: https://pass.exemple.com/api/v1/scans/history?page=1
-                  prev: null
-                  next: null
-                meta:
-                  current_page: 1
-                  from: 1
-                  last_page: 1
-                  path: https://pass.exemple.com/api/v1/scans/history
-                  per_page: 30
-                  to: 2
-                  total: 2
+                    counts: { total: 1, entries: 0, exits: 0, denied: 1, manual: 0 }
+                    last_scanned_at: '2026-10-14T18:01:40.000000Z'
+                    scans:
+                      - id: 11
+                        direction: in
+                        result: denied
+                        method: qr
+                        reason: unknown_pass
+                        forced: false
+                        offline: false
+                        scanned_at: '2026-10-14T18:01:40.000000Z'
+                        location: null
+                links: { next: null, prev: null }
+                meta: { current_page: 1, last_page: 1, per_page: 20, total: 2 }
         '401':
           $ref: '#/components/responses/Unauthenticated'
         '403':
           $ref: '#/components/responses/AccountDisabled'
-
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
   /events:
     get:
       tags: [Supervision]
@@ -1696,6 +1734,152 @@ components:
                 type: integer
               inside:
                 type: integer
+
+    ScanCounts:
+      type: object
+      required: [total, entries, exits, denied, manual]
+      properties:
+        total:
+          type: integer
+          description: Nombre de passages.
+        entries:
+          type: integer
+          description: Entrées validées.
+        exits:
+          type: integer
+          description: Sorties validées.
+        denied:
+          type: integer
+          description: Refus.
+        manual:
+          type: integer
+          description: Passages identifiés par saisie de l'immatriculation.
+
+    VehicleHistory:
+      type: object
+      required: [summary, data, links, meta]
+      properties:
+        summary:
+          allOf:
+            - $ref: '#/components/schemas/ScanCounts'
+            - type: object
+              required: [vehicles]
+              properties:
+                vehicles:
+                  type: integer
+                  description: Nombre de véhicules différents (le groupe « QR codes inconnus » compte pour un).
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/VehicleHistoryItem'
+        links:
+          type: object
+          required: [next, prev]
+          properties:
+            next:
+              type: string
+              nullable: true
+              description: '`null` sur la dernière page.'
+            prev:
+              type: string
+              nullable: true
+        meta:
+          type: object
+          required: [current_page, last_page, per_page, total]
+          properties:
+            current_page:
+              type: integer
+            last_page:
+              type: integer
+            per_page:
+              type: integer
+            total:
+              type: integer
+              description: Nombre de groupes (véhicules).
+
+    VehicleHistoryItem:
+      type: object
+      description: Un véhicule (pass) et les passages de l'utilisateur pour ce véhicule.
+      required: [pass, vehicle, event, counts, last_scanned_at, scans]
+      properties:
+        pass:
+          type: object
+          nullable: true
+          description: '`null` pour le groupe des QR codes inconnus ou hors des événements de l''agent.'
+          required: [id, number, status, presence, type]
+          properties:
+            id:
+              type: integer
+            number:
+              type: string
+            status:
+              $ref: '#/components/schemas/PassStatus'
+            presence:
+              allOf:
+                - $ref: '#/components/schemas/Direction'
+              description: Position actuelle du véhicule.
+            type:
+              type: object
+              required: [name, color]
+              properties:
+                name:
+                  type: string
+                color:
+                  type: string
+        vehicle:
+          type: object
+          nullable: true
+          required: [plate, plate_key, brand, color]
+          properties:
+            plate:
+              type: string
+            plate_key:
+              type: string
+            brand:
+              type: string
+            color:
+              type: string
+        event:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/EventRef'
+          nullable: true
+        counts:
+          $ref: '#/components/schemas/ScanCounts'
+        last_scanned_at:
+          type: string
+          format: date-time
+          description: Dernier passage de l'utilisateur pour ce véhicule.
+        scans:
+          type: array
+          description: Passages de l'utilisateur pour ce véhicule, du plus récent au plus ancien.
+          items:
+            type: object
+            required: [id, direction, result, method, reason, forced, offline, scanned_at, location]
+            properties:
+              id:
+                type: integer
+              direction:
+                $ref: '#/components/schemas/Direction'
+              result:
+                $ref: '#/components/schemas/ScanResult'
+              method:
+                $ref: '#/components/schemas/ScanMethod'
+              reason:
+                type: string
+                nullable: true
+              forced:
+                type: boolean
+              offline:
+                type: boolean
+              scanned_at:
+                type: string
+                format: date-time
+              location:
+                type: object
+                allOf:
+                  - $ref: '#/components/schemas/Location'
+                nullable: true
 
     PaginatedScans:
       type: object

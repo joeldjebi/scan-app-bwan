@@ -25,7 +25,7 @@
 | POST | `/auth/logout` | tous | Révoque le token |
 | POST | `/verify` | tous | `{code}` **ou** `{plate}` → `{valid, reason, message, method, can_force, event, pass, matches}`. N'enregistre rien. |
 | POST | `/scans` | tous | `{code}` ou `{plate}` → valide le passage (sens automatique). `422` si le pass n'est pas valide. Anti-doublon automatique (même pass, même agent, moins de 10 s). |
-| GET | `/scans/history` | tous | Mes passages, 30 par page |
+| GET | `/scans/history` | tous | Mon historique : cumul (`summary`) + **un élément par véhicule** avec ses compteurs et ses passages, 20 véhicules par page. Filtres `event`, `from`, `to` |
 | GET | `/events` | chef | Ses événements, avec `can_supervise` |
 | GET | `/events/{id}/stats` | chef | Compteurs de l'événement |
 | GET | `/events/{id}/scans` | chef | Tous les passages de l'événement, 50 par page |
