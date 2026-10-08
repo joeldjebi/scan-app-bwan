@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Web;
 use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\PassType;
+use App\Services\AuditLogger;
 use App\Services\PassGenerator;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -57,6 +58,7 @@ class PassTypeController extends Controller
         ]);
 
         $count = $generator->generate($passType, $data['count']);
+        app(AuditLogger::class)->record('pass.generated', "{$count} pass « {$passType->name} » générés", $passType, ['nombre' => $count]);
 
         return back()->with('success', "{$count} pass « {$passType->name} » générés.");
     }

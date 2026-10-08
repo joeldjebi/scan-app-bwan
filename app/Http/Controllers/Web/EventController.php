@@ -10,9 +10,12 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\User;
+use App\Services\EventCodeGenerator;
 use App\Services\PosterPalette;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
@@ -40,14 +43,25 @@ class EventController extends Controller
             'passes as inside_count' => fn ($q) => $q->where('presence', Direction::In),
         ]), 'staff']);
 
-        $stats = [
-            'total' => $event->passes()->count(),
-            'registered' => $event->passes()->where('status', PassStatus::Registered)->count(),
-            'revoked' => $event->passes()->where('status', PassStatus::Revoked)->count(),
-            'inside' => $event->passes()->where('presence', Direction::In)->count(),
-            'entries' => $event->scans()->where('result', ScanResult::Granted)->where('direction', Direction::In)->count(),
-            'denied' => $event->scans()->where('result', ScanResult::Denied)->count(),
-        ];
+        // Deux requêtes agrégées au lieu de six comptages séparés.
+        $passStats = $event->passes()->toBase()->selectRaw('count(*) as total')
+            ->selectRaw('sum(case when status = ? then 1 else 0 end) as registered', [PassStatus::Registered->value])
+            ->selectRaw('sum(case when status = ? then 1 else 0 end) as revoked', [PassStatus::Revoked->value])
+            ->selectRaw('sum(case when presence = ? then 1 else 0 end) as inside', [Direction::In->value])
+            ->first();
+        $scanStats = $event->scans()->toBase()
+            ->selectRaw('sum(case when result = ? and direction = ? then 1 else 0 end) as entries', [ScanResult::Granted->value, Direction::In->value])
+            ->selectRaw('sum(case when result = ? then 1 else 0 end) as denied', [ScanResult::Denied->value])
+            ->first();
+
+        $stats = array_map('intval', [
+            'total' => $passStats->total,
+            'registered' => $passStats->registered,
+            'revoked' => $passStats->revoked,
+            'inside' => $passStats->inside,
+            'entries' => $scanStats->entries,
+            'denied' => $scanStats->denied,
+        ]);
 
         $staffIds = $event->staff->pluck('id');
         $availableAgents = User::where('role', UserRole::Agent)
@@ -115,9 +129,35 @@ class EventController extends Controller
         $disk->delete(array_diff($previous, array_filter([$event->logo_path, $event->poster_path])));
     }
 
+    /**
+     * Suggestion de code court pendant la saisie du nom (formulaire).
+     */
+    public function suggestCode(Request $request): JsonResponse
+    {
+        $request->validate(['name' => ['nullable', 'string', 'max:255'], 'starts_at' => ['nullable', 'date'], 'event' => ['nullable', 'integer']]);
+
+        return response()->json([
+            'code' => app(EventCodeGenerator::class)->generate((string) $request->name, $this->startsAt($request), $request->integer('event') ?: null),
+        ]);
+    }
+
+    private function startsAt(Request $request): ?Carbon
+    {
+        try {
+            return $request->filled('starts_at') ? Carbon::parse($request->starts_at) : null;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
     private function validated(Request $request, ?Event $event = null): array
     {
-        $request->merge(['code' => strtoupper((string) $request->code)]);
+        // Code laissé vide : généré à partir du nom et de l'année (ex. ASF26).
+        $code = strtoupper(trim((string) $request->code));
+        if ($code === '' && $request->filled('name')) {
+            $code = app(EventCodeGenerator::class)->generate($request->name, $this->startsAt($request), $event?->id);
+        }
+        $request->merge(['code' => $code]);
 
         return $request->validate([
             'name' => ['required', 'string', 'max:255'],

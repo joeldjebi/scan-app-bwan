@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Web\ApiDocController;
+use App\Http\Controllers\Web\AuditLogController;
 use App\Http\Controllers\Web\AuthController;
 use App\Http\Controllers\Web\BrandController;
 use App\Http\Controllers\Web\DashboardController;
@@ -35,11 +36,21 @@ Route::middleware(['auth', 'active'])->group(function () {
     Route::get('dashboard', DashboardController::class)->name('dashboard');
     Route::post('logout', [AuthController::class, 'destroy'])->name('logout');
 
+    // Journal d'audit : propriétaire uniquement
+    Route::middleware('can:owner')->group(function () {
+        Route::get('audit', [AuditLogController::class, 'index'])->name('audit.index');
+        Route::get('audit/export', [AuditLogController::class, 'export'])->name('audit.export');
+    });
+
     // Administration
     Route::middleware('can:admin')->group(function () {
+        Route::get('events/code-suggestion', [EventController::class, 'suggestCode'])->name('events.code-suggestion');
         Route::resource('events', EventController::class)->except(['index', 'show']);
         Route::resource('users', UserController::class)->except(['show', 'destroy']);
         Route::get('users/{user}/scans', [UserScanController::class, 'index'])->name('users.scans');
+
+        Route::get('exports/{export}', [ExportController::class, 'show'])->name('exports.show');
+        Route::get('exports/{export}/download', [ExportController::class, 'download'])->name('exports.download');
 
         Route::resource('brands', BrandController::class)->only(['index', 'store', 'update', 'destroy']);
         Route::patch('brands/{brand}/toggle', [BrandController::class, 'toggle'])->name('brands.toggle');
@@ -61,7 +72,7 @@ Route::middleware(['auth', 'active'])->group(function () {
             Route::put('staff/{user}', [StaffController::class, 'update'])->name('staff.update');
             Route::delete('staff/{user}', [StaffController::class, 'destroy'])->name('staff.destroy');
 
-            Route::get('export/qrcodes', [ExportController::class, 'qrcodes'])->name('export.qrcodes');
+            Route::post('export/qrcodes', [ExportController::class, 'startQrCodes'])->name('export.qrcodes');
         });
     });
 

@@ -6,6 +6,7 @@ use App\Enums\StaffRole;
 use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\User;
+use App\Services\AuditLogger;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -37,6 +38,9 @@ class StaffController extends Controller
             );
         });
 
+        $names = User::whereIn('id', $data['user_ids'])->pluck('name')->implode(', ');
+        app(AuditLogger::class)->record('staff.added', "{$names} ajouté(s) à l'équipe comme {$role->label()}", $event, ['membres' => $names, 'role' => $role->value]);
+
         return back()->with('success', 'Équipe mise à jour.');
     }
 
@@ -53,12 +57,15 @@ class StaffController extends Controller
             $event->staff()->updateExistingPivot($user->id, ['role' => $role->value]);
         });
 
+        app(AuditLogger::class)->record('staff.role_changed', "{$user->name} devient {$role->label()}", $event, ['membre' => $user->name, 'role' => $role->value]);
+
         return back()->with('success', "{$user->name} est maintenant {$role->label()}.");
     }
 
     public function destroy(Event $event, User $user): RedirectResponse
     {
         $event->staff()->detach($user->id);
+        app(AuditLogger::class)->record('staff.removed', "{$user->name} retiré de l'équipe", $event, ['membre' => $user->name]);
 
         return back()->with('success', "{$user->name} a été retiré de l'équipe.");
     }

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -11,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 #[Fillable(['name', 'code', 'color'])]
 class PassType extends Model
 {
-    use HasFactory;
+    use Auditable, HasFactory;
 
     public function event(): BelongsTo
     {
@@ -21,5 +22,15 @@ class PassType extends Model
     public function passes(): HasMany
     {
         return $this->hasMany(Pass::class);
+    }
+
+    public function auditLabel(): string
+    {
+        return (string) $this->name;
+    }
+
+    protected function auditNoun(): array
+    {
+        return ['Type de pass', false];
     }
 }

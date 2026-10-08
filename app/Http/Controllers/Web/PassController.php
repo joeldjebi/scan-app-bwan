@@ -83,7 +83,7 @@ class PassController extends Controller
      */
     public function reset(Event $event, Pass $pass): RedirectResponse
     {
-        $pass->vehicle()->delete();
+        $pass->vehicle?->delete();
         $pass->update([
             'status' => $pass->status === PassStatus::Revoked ? PassStatus::Revoked : PassStatus::Pending,
             'registered_at' => null,

@@ -20,6 +20,18 @@ class DeletionService
      */
     public function deletePasses(Collection $passes): int
     {
+        if ($passes->isEmpty()) {
+            return 0;
+        }
+
+        $numbers = Pass::whereIn('id', $passes->pluck('id'))->orderBy('id')->pluck('number');
+        $event = Pass::find($passes->first()->id)?->event;
+
+        app(AuditLogger::class)->record('pass.deleted', "{$numbers->count()} pass supprimé(s), avec leur véhicule et leurs passages", $event, [
+            'nombre' => $numbers->count(),
+            'numeros' => $numbers->take(200)->all(),
+        ]);
+
         return DB::transaction(function () use ($passes) {
             foreach ($passes->pluck('id')->chunk(500) as $ids) {
                 DB::table('vehicles')->whereIn('pass_id', $ids)->delete();
@@ -39,6 +51,18 @@ class DeletionService
      */
     public function deleteScans(Collection $scans): int
     {
+        if ($scans->isEmpty()) {
+            return 0;
+        }
+
+        $details = Scan::with(['pass', 'agent'])->whereIn('id', $scans->pluck('id'))->get()
+            ->map(fn (Scan $scan) => sprintf('%s · %s · %s · %s', $scan->scanned_at->format('d/m/Y H:i:s'), $scan->pass?->number ?? 'QR inconnu', $scan->direction->label(), $scan->agent?->name ?? '—'));
+
+        app(AuditLogger::class)->record('scan.deleted', "{$details->count()} passage(s) supprimé(s)", Scan::find($scans->first()->id)?->event, [
+            'nombre' => $details->count(),
+            'passages' => $details->take(200)->all(),
+        ]);
+
         return DB::transaction(function () use ($scans) {
             Scan::whereIn('id', $scans->pluck('id'))->delete();
 

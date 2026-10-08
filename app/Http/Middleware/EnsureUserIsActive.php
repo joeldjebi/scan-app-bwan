@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Services\AuditLogger;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -15,6 +16,8 @@ class EnsureUserIsActive
         $user = $request->user();
 
         if ($user && ! $user->is_active) {
+            app(AuditLogger::class)->record('auth.blocked', 'Accès refusé : compte désactivé', $user);
+
             if ($request->is('api/*') || $request->expectsJson()) {
                 $token = $user->currentAccessToken();
 

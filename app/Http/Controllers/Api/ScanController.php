@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Resources\PassResource;
 use App\Http\Resources\ScanResource;
 use App\Models\Scan;
+use App\Services\AuditLogger;
 use App\Services\PassScanner;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -92,6 +93,14 @@ class ScanController extends Controller
             ...self::location($data),
         ]);
 
+        if ($forced) {
+            app(AuditLogger::class)->record('scan.forced', "Passage forcé du pass « {$outcome->pass->number} » ({$outcome->message()})", $outcome->pass, [
+                'motif_refus' => $outcome->reason,
+                'motif_saisi' => $data['reason'] ?? null,
+                'sens' => $scan->direction->value,
+            ]);
+        }
+
         return $this->scanResponse($scan, 201);
     }
 
@@ -139,6 +148,11 @@ class ScanController extends Controller
                 return ['client_uuid' => $item['client_uuid'], 'status' => 'created'];
             })
             ->values();
+
+        app(AuditLogger::class)->record('scan.batch', "Envoi de {$results->count()} passage(s) effectués hors ligne", properties: [
+            'crees' => $results->where('status', 'created')->count(),
+            'doublons' => $results->where('status', 'duplicate')->count(),
+        ]);
 
         return response()->json([
             'created' => $results->where('status', 'created')->count(),

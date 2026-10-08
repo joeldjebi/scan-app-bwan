@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\EventStatus;
 use App\Enums\StaffRole;
+use App\Models\Concerns\Auditable;
 use App\Services\PosterPalette;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,7 +16,7 @@ use Illuminate\Support\Facades\Storage;
 #[Fillable(['name', 'code', 'location', 'starts_at', 'ends_at', 'status', 'description', 'logo_path', 'poster_path', 'theme_from_poster', 'primary_color', 'secondary_color'])]
 class Event extends Model
 {
-    use HasFactory;
+    use Auditable, HasFactory;
 
     protected function casts(): array
     {
@@ -87,5 +88,15 @@ class Event extends Model
             'primary_soft' => PosterPalette::shade($primary, 0.88),
             'primary_dark' => PosterPalette::shade($primary, -0.45),
         ];
+    }
+
+    public function auditLabel(): string
+    {
+        return (string) $this->name;
+    }
+
+    protected function auditNoun(): array
+    {
+        return ['Événement', false];
     }
 }

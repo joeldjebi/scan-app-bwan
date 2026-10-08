@@ -34,13 +34,23 @@ class BackOfficeTest extends TestCase
         $this->get(route('events.passes.index', $event))->assertOk()->assertSee('GALA26-VIP-0001');
     }
 
-    public function test_exports_qr_zip_and_spreadsheet(): void
+    public function test_exports_qr_zip_in_background_and_spreadsheet(): void
     {
         $admin = User::factory()->admin()->create();
         $pass = Pass::factory()->registered()->create();
 
-        $response = $this->actingAs($admin)->get(route('events.export.qrcodes', [$pass->event_id, 'format' => 'svg']));
-        $response->assertOk()->assertDownload();
+        $started = $this->actingAs($admin)
+            ->postJson(route('events.export.qrcodes', $pass->event_id), ['format' => 'svg'])
+            ->assertAccepted()
+            ->assertJsonPath('total', 1);
+
+        // En test, la file d'attente est synchrone : l'export est déjà terminé.
+        $status = $this->getJson($started->json('status_url'))
+            ->assertOk()
+            ->assertJsonPath('status', 'done')
+            ->assertJsonPath('processed', 1);
+
+        $response = $this->get($status->json('download_url'))->assertOk()->assertDownload();
 
         $zip = new \ZipArchive;
         $zip->open($response->baseResponse->getFile()->getPathname());
@@ -48,7 +58,10 @@ class BackOfficeTest extends TestCase
         $this->assertStringContainsString($pass->url(), $zip->getFromName('passes.csv'));
         $zip->close();
 
-        $this->get(route('events.export.passes', [$pass->event_id, 'format' => 'csv']))->assertOk();
+        // Un autre admin ne peut pas suivre ni télécharger cet export.
+        $this->actingAs(User::factory()->admin()->create())->getJson($started->json('status_url'))->assertForbidden();
+
+        $this->actingAs($admin)->get(route('events.export.passes', [$pass->event_id, 'format' => 'csv']))->assertOk();
     }
 
     public function test_only_one_chief_per_event(): void
@@ -78,7 +91,7 @@ class BackOfficeTest extends TestCase
 
         // Pas d'accès aux fonctions d'administration ni aux autres événements.
         $this->get(route('events.create'))->assertForbidden();
-        $this->get(route('events.export.qrcodes', $event))->assertForbidden();
+        $this->postJson(route('events.export.qrcodes', $event), ['format' => 'svg'])->assertForbidden();
         $this->get(route('events.show', Event::factory()->create()))->assertForbidden();
     }
 

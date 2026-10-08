@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\Direction;
 use App\Enums\PassStatus;
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -15,7 +16,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable(['status', 'presence', 'registered_at', 'last_scanned_at'])]
 class Pass extends Model
 {
-    use HasFactory, SoftDeletes;
+    use Auditable, HasFactory, SoftDeletes;
 
     protected function casts(): array
     {
@@ -66,5 +67,18 @@ class Pass extends Model
     public function nextDirection(): Direction
     {
         return $this->presence->opposite();
+    }
+
+    /** Champs ignorés par le journal d'audit (mis à jour à chaque passage). */
+    protected array $auditExclude = ['presence', 'last_scanned_at'];
+
+    public function auditLabel(): string
+    {
+        return (string) $this->number;
+    }
+
+    protected function auditNoun(): array
+    {
+        return ['Pass', false];
     }
 }

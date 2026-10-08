@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\Auditable;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -11,7 +12,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 #[Fillable(['event_id', 'plate', 'brand', 'color', 'phone'])]
 class Vehicle extends Model
 {
-    use HasFactory;
+    use Auditable, HasFactory;
 
     /** La synchronisation hors ligne se base sur passes.updated_at. */
     protected $touches = ['pass'];
@@ -41,5 +42,18 @@ class Vehicle extends Model
     public static function plateKey(string $value): string
     {
         return preg_replace('/[^A-Z0-9]/', '', mb_strtoupper($value));
+    }
+
+    /** Champs ignorés par le journal d'audit (mis à jour à chaque passage). */
+    protected array $auditExclude = ['plate_key'];
+
+    public function auditLabel(): string
+    {
+        return (string) $this->plate;
+    }
+
+    protected function auditNoun(): array
+    {
+        return ['Véhicule', false];
     }
 }

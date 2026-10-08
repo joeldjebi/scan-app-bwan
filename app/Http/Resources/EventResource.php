@@ -13,6 +13,11 @@ class EventResource extends JsonResource
     {
         $user = $request->user();
 
+        // Rôle déjà chargé via la relation user->events (pivot) : évite une requête par événement.
+        $role = $user->isAdmin()
+            ? 'admin'
+            : ($this->pivot?->role ?? $user->staffRoleFor($this->resource))?->value;
+
         return [
             'id' => $this->id,
             'name' => $this->name,
@@ -22,8 +27,8 @@ class EventResource extends JsonResource
             'ends_at' => $this->ends_at,
             'status' => $this->status,
             // Rôle de l'utilisateur connecté : chief, agent, ou admin.
-            'my_role' => $user->isAdmin() ? 'admin' : $user->staffRoleFor($this->resource)?->value,
-            'can_supervise' => $user->canSupervise($this->resource),
+            'my_role' => $role,
+            'can_supervise' => in_array($role, ['admin', 'chief'], true),
             'pass_types' => $this->passTypes->map->only(['id', 'name', 'code', 'color']),
         ];
     }

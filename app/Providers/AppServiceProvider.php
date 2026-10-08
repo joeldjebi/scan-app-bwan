@@ -36,6 +36,9 @@ class AppServiceProvider extends ServiceProvider
         // Admin : gestion des événements, des pass, des QR codes et des comptes.
         Gate::define('admin', fn (User $user) => $user->isAdmin());
 
+        // Propriétaire (premier administrateur) : journal d'audit.
+        Gate::define('owner', fn (User $user) => $user->isOwner());
+
         // Admin ou membre de l'équipe de l'événement (chef ou agent) : scanner.
         Gate::define('operate', fn (User $user, Event $event) => $user->canOperate($event));
 

@@ -3,14 +3,18 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
+use App\Jobs\GenerateQrCodesExport;
 use App\Models\Event;
+use App\Models\Export;
 use App\Models\Pass;
-use App\Services\QrCode;
+use App\Services\AuditLogger;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Spatie\SimpleExcel\SimpleExcelWriter;
 use Symfony\Component\HttpFoundation\BinaryFileResponse;
-use ZipArchive;
 
 class ExportController extends Controller
 {
@@ -31,6 +35,7 @@ class ExportController extends Controller
             ->each(fn (Pass $pass) => $writer->addRow($this->row($pass)));
 
         $writer->close();
+        app(AuditLogger::class)->record('export.passes', 'Export de la liste des pass ('.strtoupper($format).')', $event, ['format' => $format, 'filtres' => array_filter($request->only('q', 'type', 'status', 'presence'))]);
 
         return response()
             ->download($path, sprintf('pass-%s-%s.%s', Str::slug($event->code), now()->format('Ymd-His'), $format))
@@ -38,48 +43,53 @@ class ExportController extends Controller
     }
 
     /**
-     * Archive ZIP des QR codes pour l'équipe design : un fichier par pass, nommé
-     * par son numéro, plus un CSV de fusion (colonne @qr compatible InDesign).
+     * Lance la préparation du ZIP des QR codes en arrière-plan (un fichier par pass, nommé
+     * par son numéro, plus un CSV de fusion « @qr » compatible InDesign).
      */
-    public function qrcodes(Request $request, Event $event): BinaryFileResponse
+    public function startQrCodes(Request $request, Event $event): JsonResponse
     {
-        $request->validate([
-            'format' => ['nullable', 'in:svg,png'],
-            'type' => ['nullable', 'integer'],
+        $data = $request->validate([
+            'format' => ['required', 'in:svg,png'],
+            'type' => ['nullable', 'integer', Rule::exists('pass_types', 'id')->where('event_id', $event->id)],
         ]);
 
-        @set_time_limit(0);
+        $export = Export::create([
+            'user_id' => $request->user()->id,
+            'event_id' => $event->id,
+            'pass_type_id' => $data['type'] ?? null,
+            'format' => $data['format'],
+            'total' => $event->passes()->when($data['type'] ?? null, fn ($query, $type) => $query->where('pass_type_id', $type))->count(),
+        ]);
 
-        $format = $request->format ?? 'svg';
-        $path = tempnam(sys_get_temp_dir(), 'qr');
-        $zip = new ZipArchive;
-        $zip->open($path, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+        app(AuditLogger::class)->record('export.qrcodes', 'Export des QR codes ('.strtoupper($export->format).')', $event, [
+            'format' => $export->format,
+            'type_id' => $export->pass_type_id,
+            'nombre' => $export->total,
+        ]);
 
-        $csv = fopen('php://temp', 'r+');
-        fputcsv($csv, ['numero', 'type', 'code_type', 'lien', '@qr']);
+        GenerateQrCodesExport::dispatch($export);
 
-        $event->passes()
-            ->with('type')
-            ->when($request->type, fn ($query, $type) => $query->where('pass_type_id', $type))
-            ->orderBy('pass_type_id')
-            ->orderBy('sequence')
-            ->lazy(500)
-            ->each(function (Pass $pass) use ($zip, $csv, $format) {
-                $file = "{$pass->type->code}/{$pass->number}.{$format}";
-                $content = $format === 'png' ? QrCode::png($pass->url()) : QrCode::svg($pass->url());
+        return response()->json($export->fresh()->toProgress(), 202);
+    }
 
-                $zip->addFromString($file, $content);
-                fputcsv($csv, [$pass->number, $pass->type->name, $pass->type->code, $pass->url(), $file]);
-            });
+    public function show(Request $request, Export $export): JsonResponse
+    {
+        $this->ensureOwner($request, $export);
 
-        rewind($csv);
-        $zip->addFromString('passes.csv', "\xEF\xBB\xBF".stream_get_contents($csv));
-        fclose($csv);
-        $zip->close();
+        return response()->json($export->toProgress());
+    }
 
-        return response()
-            ->download($path, sprintf('qrcodes-%s-%s.zip', Str::slug($event->code), $format))
-            ->deleteFileAfterSend();
+    public function download(Request $request, Export $export): BinaryFileResponse
+    {
+        $this->ensureOwner($request, $export);
+        abort_unless($export->status === 'done' && Storage::disk('local')->exists($export->file_path), 404, 'Ce fichier a expiré : relancez l\'export.');
+
+        return response()->download(Storage::disk('local')->path($export->file_path), $export->file_name);
+    }
+
+    private function ensureOwner(Request $request, Export $export): void
+    {
+        abort_unless($export->user_id === $request->user()->id || $request->user()->isOwner(), 403);
     }
 
     private function row(Pass $pass): array

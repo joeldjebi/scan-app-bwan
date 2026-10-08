@@ -10,15 +10,48 @@
             @csrf
             @if ($event->exists) @method('PUT') @endif
 
-            <div class="grid gap-5 sm:grid-cols-3">
+            @php($codeLocked = $event->exists && $event->passes()->exists())
+            <div class="grid gap-5 sm:grid-cols-3"
+                 x-data="{
+                     name: @js(old('name', $event->name)),
+                     code: @js(old('code', $event->code)),
+                     auto: @js(! $event->exists && ! old('code')),
+                     loading: false,
+                     timer: null,
+                     suggest() {
+                         if (!this.auto || @js($codeLocked)) return;
+                         clearTimeout(this.timer);
+                         this.timer = setTimeout(async () => {
+                             if (!this.name.trim()) { this.code = ''; return; }
+                             this.loading = true;
+                             const params = new URLSearchParams({ name: this.name, starts_at: document.querySelector('[name=starts_at]')?.value ?? '', event: @js($event->id ?? '') });
+                             try {
+                                 const response = await fetch(@js(route('events.code-suggestion')) + '?' + params, { headers: { Accept: 'application/json' } });
+                                 if (response.ok && this.auto) { this.code = (await response.json()).code; }
+                             } finally { this.loading = false; }
+                         }, 350);
+                     },
+                 }"
+                 @starts-at-changed.window="suggest()">
                 <div class="sm:col-span-2">
                     <label class="block text-sm font-medium text-slate-700">Nom de l'événement</label>
-                    <input name="name" value="{{ old('name', $event->name) }}" required class="{{ $input }}">
+                    <input name="name" x-model="name" @input="suggest()" required class="{{ $input }}">
                 </div>
                 <div>
-                    <label class="block text-sm font-medium text-slate-700">Code court</label>
-                    <input name="code" value="{{ old('code', $event->code) }}" required maxlength="12" placeholder="Ex. FEST26" class="{{ $input }} font-mono uppercase">
-                    <p class="mt-1 text-xs text-slate-500">Préfixe des numéros de pass.</p>
+                    <label class="flex items-center justify-between text-sm font-medium text-slate-700">
+                        Code court
+                        <span x-show="loading" x-cloak class="size-3.5 animate-spin rounded-full border-2 border-slate-300 border-t-indigo-600" aria-label="Calcul du code"></span>
+                    </label>
+                    <input name="code" x-model="code" maxlength="12" placeholder="Automatique" @input="auto = false"
+                           @readonly($codeLocked) class="{{ $input }} font-mono uppercase {{ $codeLocked ? 'bg-slate-100 text-slate-500' : '' }}">
+                    @if ($codeLocked)
+                        <p class="mt-1 text-xs text-slate-500">Verrouillé : des pass ont déjà été générés.</p>
+                    @else
+                        <p class="mt-1 text-xs text-slate-500">
+                            <span x-show="auto">Généré automatiquement depuis le nom.</span>
+                            <span x-show="!auto" x-cloak>Personnalisé · <button type="button" class="text-indigo-600 hover:underline" @click="auto = true; suggest()">régénérer</button></span>
+                        </p>
+                    @endif
                 </div>
             </div>
 
@@ -30,7 +63,7 @@
             <div class="grid gap-5 sm:grid-cols-2">
                 <div>
                     <label class="block text-sm font-medium text-slate-700">Début</label>
-                    <input type="datetime-local" name="starts_at" value="{{ old('starts_at', $event->starts_at?->format('Y-m-d\TH:i')) }}" required class="{{ $input }}">
+                    <input type="datetime-local" name="starts_at" value="{{ old('starts_at', $event->starts_at?->format('Y-m-d\TH:i')) }}" required class="{{ $input }}" @change="$dispatch('starts-at-changed')">
                 </div>
                 <div>
                     <label class="block text-sm font-medium text-slate-700">Fin</label>

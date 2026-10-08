@@ -7,6 +7,7 @@ use App\Models\Brand;
 use App\Models\Pass;
 use App\Models\Vehicle;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
@@ -22,10 +23,12 @@ class VehicleRegistration
      */
     public static function brands(): array
     {
-        $brands = Brand::active()->pluck('name')->all();
-        sort($brands, SORT_NATURAL | SORT_FLAG_CASE);
+        return Cache::rememberForever(Brand::CACHE_KEY, function () {
+            $brands = Brand::active()->pluck('name')->all();
+            sort($brands, SORT_NATURAL | SORT_FLAG_CASE);
 
-        return [...$brands, self::OTHER_BRAND];
+            return [...$brands, self::OTHER_BRAND];
+        });
     }
 
     /**

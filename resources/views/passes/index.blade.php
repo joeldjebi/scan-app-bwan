@@ -28,8 +28,8 @@
             <button class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Filtrer</button>
         </form>
         <div class="flex gap-2 text-sm">
-            <a href="{{ route('events.export.passes', [$event, ...request()->only('q', 'type', 'status', 'presence'), 'format' => 'xlsx']) }}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">Excel</a>
-            <a href="{{ route('events.export.passes', [$event, ...request()->only('q', 'type', 'status', 'presence'), 'format' => 'csv']) }}" class="rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">CSV</a>
+            <a href="{{ route('events.export.passes', [$event, ...request()->only('q', 'type', 'status', 'presence'), 'format' => 'xlsx']) }}" data-download="Export Excel des pass" class="rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">Excel</a>
+            <a href="{{ route('events.export.passes', [$event, ...request()->only('q', 'type', 'status', 'presence'), 'format' => 'csv']) }}" data-download="Export CSV des pass" class="rounded-lg border border-slate-300 bg-white px-3 py-2 hover:bg-slate-50">CSV</a>
         </div>
     </div>
 

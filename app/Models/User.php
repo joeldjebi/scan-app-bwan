@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\StaffRole;
 use App\Enums\UserRole;
+use App\Models\Concerns\Auditable;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -19,7 +20,7 @@ use Laravel\Sanctum\HasApiTokens;
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
-    use HasApiTokens, HasFactory, Notifiable;
+    use Auditable, HasApiTokens, HasFactory, Notifiable;
 
     /**
      * Get the attributes that should be cast.
@@ -51,7 +52,7 @@ class User extends Authenticatable
 
     public function isOwner(): bool
     {
-        return $this->is_owner;
+        return (bool) $this->is_owner;
     }
 
     /**
@@ -124,5 +125,15 @@ class User extends Authenticatable
     public function canSupervise(Event $event): bool
     {
         return $this->isAdmin() || $this->isChiefOf($event);
+    }
+
+    public function auditLabel(): string
+    {
+        return (string) $this->name;
+    }
+
+    protected function auditNoun(): array
+    {
+        return ['Compte', false];
     }
 }
