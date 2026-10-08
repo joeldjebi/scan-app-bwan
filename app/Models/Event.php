@@ -61,6 +61,28 @@ class Event extends Model
         return $this->status === EventStatus::Closed;
     }
 
+    public function hasEnded(): bool
+    {
+        return $this->ends_at->isPast();
+    }
+
+    /**
+     * Période lisible : « jeudi 8 octobre 2026 · 18h00 – 23h00 » sur une journée,
+     * « du jeudi 8 octobre · 11h18 au samedi 10 octobre 2026 · 23h00 » sinon.
+     */
+    public function periodLabel(): string
+    {
+        $time = 'H\\hi';
+
+        if ($this->starts_at->isSameDay($this->ends_at)) {
+            return $this->starts_at->translatedFormat("l j F Y · {$time}").' – '.$this->ends_at->translatedFormat($time);
+        }
+
+        $startFormat = $this->starts_at->isSameYear($this->ends_at) ? "l j F · {$time}" : "l j F Y · {$time}";
+
+        return 'du '.$this->starts_at->translatedFormat($startFormat).' au '.$this->ends_at->translatedFormat("l j F Y · {$time}");
+    }
+
     public function logoUrl(): ?string
     {
         return $this->logo_path ? Storage::disk('public')->url($this->logo_path) : null;

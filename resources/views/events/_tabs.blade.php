@@ -22,6 +22,14 @@
             <a href="{{ route('events.edit', $event) }}" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">Modifier</a>
         @endcan
     </div>
+    @if ($event->isClosed() && ! $event->hasEnded())
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <span><strong>Événement clôturé avant sa date de fin</strong> ({{ $event->ends_at->translatedFormat('j F Y à H\hi') }}) : les usagers ne peuvent plus enregistrer leur véhicule et tous les scans sont refusés.</span>
+            @can('admin')
+                <a href="{{ route('events.edit', $event) }}" class="font-semibold underline">Modifier le statut</a>
+            @endcan
+        </div>
+    @endif
     <div class="mt-4 flex gap-1 border-b border-slate-200 text-sm">
         @foreach (['events.show' => 'Vue d\'ensemble', 'events.passes.index' => 'Pass', 'events.scans.index' => 'Passages'] as $route => $label)
             <a href="{{ route($route, $event) }}" class="-mb-px border-b-2 px-4 py-2 {{ request()->routeIs($route, $route === 'events.passes.index' ? 'events.passes.*' : $route) ? 'border-indigo-600 font-medium text-indigo-700' : 'border-transparent text-slate-600 hover:text-slate-900' }}">{{ $label }}</a>

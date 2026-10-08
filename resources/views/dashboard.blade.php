@@ -29,7 +29,7 @@
                         <h2 class="font-semibold">{{ $event->name }}</h2>
                         <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-medium {{ match ($event->status) { \App\Enums\EventStatus::Active => 'bg-emerald-100 text-emerald-800', \App\Enums\EventStatus::Closed => 'bg-slate-200 text-slate-700', default => 'bg-amber-100 text-amber-800' } }}">{{ $event->status->label() }}</span>
                     </div>
-                    <p class="mt-1 text-sm text-slate-500">{{ $event->starts_at->translatedFormat('d M Y, H\hi') }}@if ($event->location) · {{ $event->location }}@endif</p>
+                    <p class="mt-1 text-sm text-slate-500">{{ $event->starts_at->translatedFormat('d M Y, H\hi') }} → {{ $event->ends_at->translatedFormat($event->starts_at->isSameDay($event->ends_at) ? 'H\hi' : 'd M Y, H\hi') }}@if ($event->location) · {{ $event->location }}@endif</p>
                     <div class="mt-4 grid grid-cols-3 gap-2 text-center">
                         <div class="rounded-lg bg-slate-50 py-2"><p class="text-lg font-semibold">{{ $event->passes_count }}</p><p class="text-xs text-slate-500">Pass</p></div>
                         <div class="rounded-lg bg-slate-50 py-2"><p class="text-lg font-semibold">{{ $event->registered_count }}</p><p class="text-xs text-slate-500">Enregistrés</p></div>

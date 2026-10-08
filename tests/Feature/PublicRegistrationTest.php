@@ -82,6 +82,24 @@ class PublicRegistrationTest extends TestCase
             ->assertSessionHasErrors('plate');
     }
 
+    public function test_page_shows_event_period_and_why_registration_is_closed(): void
+    {
+        $event = Event::factory()->create([
+            'starts_at' => '2026-10-08 11:18', 'ends_at' => now()->addDays(2)->setTime(23, 0), 'status' => 'active',
+        ]);
+        $pass = Pass::factory()->create(['pass_type_id' => PassType::factory()->create(['event_id' => $event->id])->id]);
+
+        $this->get(route('public.pass', $pass->token))->assertSee('Du jeudi 8 octobre')->assertSee('Enregistrer mon véhicule');
+
+        $event->update(['status' => 'closed']);
+        $this->get(route('public.pass', $pass->token))
+            ->assertSee("L'organisateur a clôturé les enregistrements", false)
+            ->assertDontSee('Cet événement est terminé');
+
+        $event->update(['ends_at' => now()->subHour()]);
+        $this->get(route('public.pass', $pass->token))->assertSee('Cet événement est terminé');
+    }
+
     public function test_unknown_token_returns_404(): void
     {
         $this->get('/p/doesnotexist')->assertNotFound();
