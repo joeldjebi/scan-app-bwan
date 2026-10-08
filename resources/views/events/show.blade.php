@@ -51,21 +51,7 @@
                                         <button class="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Générer</button>
                                     </form>
                                     @if ($type->passes_count)
-                                        <div class="relative" x-data="{ open: false }">
-                                            <button @click="open = !open" class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">QR codes ▾</button>
-                                            <div x-show="open" @click.outside="open = false" x-cloak class="absolute right-0 z-10 mt-1 w-48 rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg">
-<form method="POST" action="{{ route('events.export.qrcodes', $event) }}" data-background-export="Préparation des QR codes (SVG)">
-                                                    @csrf
-                                                    <input type="hidden" name="format" value="svg"><input type="hidden" name="type" value="{{ $type->id }}">
-                                                    <button class="block w-full px-3 py-2 text-left hover:bg-slate-50">ZIP · SVG (vectoriel)</button>
-                                                </form>
-                                                <form method="POST" action="{{ route('events.export.qrcodes', $event) }}" data-background-export="Préparation des QR codes (PNG)">
-                                                    @csrf
-                                                    <input type="hidden" name="format" value="png"><input type="hidden" name="type" value="{{ $type->id }}">
-                                                    <button class="block w-full px-3 py-2 text-left hover:bg-slate-50">ZIP · PNG (1024 px)</button>
-                                                </form>
-                                            </div>
-                                        </div>
+                                        @include('events._qr-export', ['type' => $type, 'count' => $type->passes_count])
                                     @endif
                                     <button @click="edit = !edit" class="px-1 text-sm text-slate-500 hover:text-slate-800">Modifier</button>
                                 </div>
@@ -112,18 +98,8 @@
                 </form>
                 @if ($stats['total'])
                     <div class="border-t border-slate-200 px-5 py-3 text-sm">
-                        <span class="inline-flex flex-wrap items-center gap-1">
-                        Tous les QR codes :
-                        <form class="inline" method="POST" action="{{ route('events.export.qrcodes', $event) }}" data-background-export="Préparation des QR codes (SVG)">
-                                                    @csrf
-                                                    <input type="hidden" name="format" value="svg">
-                                                    <button class="text-indigo-600 hover:underline">ZIP SVG</button>
-                                                </form> ·
-                        <form class="inline" method="POST" action="{{ route('events.export.qrcodes', $event) }}" data-background-export="Préparation des QR codes (PNG)">
-                                                    @csrf
-                                                    <input type="hidden" name="format" value="png">
-                                                    <button class="text-indigo-600 hover:underline">ZIP PNG</button>
-                                                </form>
+                        <span class="inline-flex items-center gap-2">
+                            @include('events._qr-export', ['count' => $stats['total'], 'label' => 'Exporter tous les QR codes', 'align' => 'left-0', 'buttonClass' => 'text-indigo-600 hover:underline'])
                         </span>
                         <span class="text-slate-500">— inclut un fichier passes.csv pour la fusion dans le gabarit.</span>
                     </div>

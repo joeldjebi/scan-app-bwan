@@ -1,11 +1,11 @@
 /**
  * Back-office Pass Parking : navigation et formulaires en AJAX, chargement réutilisable,
- * notifications, téléchargements avec progression et exports en arrière-plan.
+ * notifications, téléchargements avec progression et export des QR codes par lots.
  *
  * Conventions (amélioration progressive : sans JavaScript, tout fonctionne normalement) :
  * - tout formulaire et tout lien interne de #app-page passe en AJAX, sauf `data-ajax="false"` ;
  * - `a[data-download]` : téléchargement avec barre de progression ;
- * - `[data-background-export]` (formulaire) : export préparé en arrière-plan, puis téléchargé ;
+ * - `form[data-qr-export]` : export des QR codes par lots, chaque lot généré au téléchargement ;
  * - API globale : window.App.{loader, progress, toast, visit, request}.
  */
 (() => {
@@ -66,6 +66,9 @@
             const panel = this.el();
             if (!panel) return;
             panel.querySelector('[data-title]').textContent = title;
+            panel.querySelector('[data-files]').replaceChildren();
+            panel.querySelector('[data-actions]').hidden = true;
+            panel.querySelector('[data-download-all]').hidden = true;
             this.update(null, detail);
             panel.hidden = false;
             requestAnimationFrame(() => panel.classList.add('is-open'));
@@ -250,6 +253,11 @@
         const method = (form.getAttribute('method') || 'GET').toUpperCase();
         const action = form.getAttribute('action') || window.location.href;
 
+        if (form.dataset.qrExport !== undefined) {
+            qrExport(form, event.submitter);
+            return;
+        }
+
         // Filtres et recherches : simple navigation.
         if (method === 'GET') {
             const query = new URLSearchParams(new FormData(form));
@@ -257,11 +265,6 @@
             const url = new URL(action, window.location.href);
             url.search = query.toString();
             visit(url.toString());
-            return;
-        }
-
-        if (form.dataset.backgroundExport !== undefined) {
-            backgroundExport(form, event.submitter);
             return;
         }
 
@@ -348,32 +351,96 @@
         }
     }
 
-    /** Lance un export en arrière-plan, suit sa progression, puis le télécharge. */
-    async function backgroundExport(form, submitter) {
+    /** Enregistre un Blob reçu sous le nom donné par le serveur. */
+    function saveBlob(blob, xhr, fallback) {
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = filenameFrom(xhr, fallback);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), 10000);
+    }
+
+    /**
+     * Export des QR codes par lots : affiche le découpage, puis génère et télécharge chaque lot
+     * à la demande (un lot = une requête ; rien n'est conservé sur le serveur).
+     */
+    async function qrExport(form, submitter) {
         loader.button(submitter, true);
-        progress.open(form.dataset.backgroundExport || 'Export en cours…', 'Mise en file d\'attente…');
         try {
-            const body = new FormData(form);
-            if (submitter?.name) body.append(submitter.name, submitter.value);
-            const { status, data } = await request({ method: 'POST', url: form.action, body });
+            const url = new URL(form.action, window.location.href);
+            url.search = new URLSearchParams(new FormData(form)).toString();
+            const { status, data } = await request({ url: url.toString() });
             if (status >= 400) throw new Error(errorMessage(status, data));
+            if (!data.lots.length) throw new Error('Aucun pass à exporter.');
 
-            let state = data;
-            while (!['done', 'failed'].includes(state.status)) {
-                progress.update(state.total ? state.processed / state.total : null,
-                    state.status === 'pending' ? 'En attente de traitement…' : `${state.processed} / ${state.total} QR codes générés`);
-                await new Promise((resolve) => setTimeout(resolve, 1000));
-                state = (await request({ url: state.status_url })).data;
-            }
-            if (state.status === 'failed') throw new Error(state.error || 'L\'export a échoué.');
+            form.closest('[x-data]')?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+            const lots = data.lots.length;
+            progress.open(form.dataset.qrExport || 'QR codes',
+                lots > 1 ? `${data.total} QR codes en ${lots} lots : téléchargez-les un par un ou tous à la suite.` : `${data.total} QR codes.`);
+            progress.update(0);
 
-            progress.update(1, 'Prêt : téléchargement…');
-            window.location.href = state.download_url;
-            toast('Export prêt : le téléchargement commence.');
+            const panel = progress.el();
+            const list = panel.querySelector('[data-files]');
+            const done = new Set();
+            const queue = [];
+
+            const downloadLot = async (lot, item) => {
+                const state = item.querySelector('[data-state]');
+                const button = item.querySelector('button');
+                button.disabled = true;
+                state.textContent = 'Génération…';
+                try {
+                    const response = await request({
+                        url: lot.url,
+                        accept: '*/*',
+                        responseType: 'blob',
+                        onDownload: (ratio) => { state.textContent = ratio === null ? 'Téléchargement…' : `Téléchargement ${Math.round(ratio * 100)} %`; },
+                    });
+                    if (response.status >= 400) throw new Error(errorMessage(response.status));
+                    saveBlob(response.data, response.xhr, lot.name);
+                    done.add(lot.lot);
+                    state.textContent = '✓ Téléchargé';
+                    button.textContent = 'Retélécharger';
+                    item.classList.add('border-emerald-300', 'bg-emerald-50');
+                    progress.update(done.size / lots, done.size === lots ? 'Tous les lots ont été téléchargés.' : undefined);
+                } catch (error) {
+                    state.textContent = 'Échec : réessayez';
+                    toast(error.message, 'error');
+                } finally {
+                    button.disabled = false;
+                }
+            };
+
+            data.lots.forEach((lot) => {
+                const item = document.createElement('li');
+                item.className = 'flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm transition-colors';
+                item.innerHTML = `<div class="min-w-0"><p class="font-medium"></p><p class="truncate text-xs text-slate-500"></p><p data-state class="text-xs font-medium text-indigo-600"></p></div>
+                    <button type="button" class="shrink-0 rounded-lg bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 disabled:opacity-50">Télécharger</button>`;
+                item.querySelector('p').textContent = lots > 1 ? `Lot ${lot.lot} / ${lots} · ${lot.count} QR codes` : `${lot.count} QR codes`;
+                item.querySelector('p + p').textContent = `${lot.from} → ${lot.to}`;
+                item.querySelector('button').addEventListener('click', () => downloadLot(lot, item));
+                list.appendChild(item);
+                queue.push([lot, item]);
+            });
+
+            const downloadAll = panel.querySelector('[data-download-all]');
+            downloadAll.hidden = lots < 2;
+            downloadAll.onclick = async () => {
+                downloadAll.disabled = true;
+                for (const [lot, item] of queue) {
+                    if (!done.has(lot.lot)) await downloadLot(lot, item);
+                }
+                downloadAll.disabled = false;
+            };
+            panel.querySelector('[data-close]').onclick = () => progress.close();
+            panel.querySelector('[data-actions]').hidden = false;
+
+            if (lots === 1) downloadLot(...queue[0]);
         } catch (error) {
             toast(error.message, 'error');
         } finally {
-            setTimeout(() => progress.close(), 600);
             loader.button(submitter, false);
         }
     }

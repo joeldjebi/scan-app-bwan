@@ -3,14 +3,13 @@
 namespace App\Http\Controllers\Web;
 
 use App\Http\Controllers\Controller;
-use App\Jobs\GenerateQrCodesExport;
 use App\Models\Event;
-use App\Models\Export;
 use App\Models\Pass;
+use App\Models\PassType;
 use App\Services\AuditLogger;
+use App\Services\QrCodeExporter;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Spatie\SimpleExcel\SimpleExcelWriter;
@@ -43,53 +42,60 @@ class ExportController extends Controller
     }
 
     /**
-     * Lance la préparation du ZIP des QR codes en arrière-plan (un fichier par pass, nommé
-     * par son numéro, plus un CSV de fusion « @qr » compatible InDesign).
+     * Découpage en lots de l'export des QR codes (affiché avant le téléchargement).
      */
-    public function startQrCodes(Request $request, Event $event): JsonResponse
+    public function qrCodesPlan(Request $request, Event $event, QrCodeExporter $exporter): JsonResponse
+    {
+        [$type, $format, $batchSize] = $this->qrOptions($request, $event);
+
+        $lots = collect($exporter->plan($event, $type, $format, $batchSize))->map(fn (array $lot) => [
+            ...$lot,
+            'url' => route('events.export.qrcodes', [$event, 'format' => $format, 'type' => $type?->id, 'batch_size' => $batchSize, 'lot' => $lot['lot']]),
+        ]);
+
+        return response()->json(['total' => $lots->sum('count'), 'lots' => $lots->values()]);
+    }
+
+    /**
+     * Génère un lot de QR codes à la demande et l'envoie directement : le ZIP n'existe que
+     * le temps de l'envoi (fichier temporaire supprimé ensuite).
+     */
+    public function qrCodes(Request $request, Event $event, QrCodeExporter $exporter): BinaryFileResponse
+    {
+        [$type, $format, $batchSize] = $this->qrOptions($request, $event);
+        $lot = max(1, $request->integer('lot', 1));
+
+        @set_time_limit(0);
+        $zip = $exporter->build($event, $type, $format, $batchSize, $lot);
+        abort_unless($zip, 404, 'Ce lot n\'existe pas.');
+
+        app(AuditLogger::class)->record('export.qrcodes', "Export des QR codes ({$zip['count']} · ".strtoupper($format).')', $event, [
+            'format' => $format,
+            'type' => $type?->name,
+            'lot' => $lot,
+            'fichier' => $zip['name'],
+        ]);
+
+        return response()->download($zip['path'], $zip['name'])->deleteFileAfterSend();
+    }
+
+    /**
+     * @return array{0: ?PassType, 1: string, 2: int}
+     */
+    private function qrOptions(Request $request, Event $event): array
     {
         $data = $request->validate([
             'format' => ['required', 'in:svg,png'],
             'type' => ['nullable', 'integer', Rule::exists('pass_types', 'id')->where('event_id', $event->id)],
+            'batch_size' => ['nullable', 'integer', Rule::in(QrCodeExporter::BATCH_SIZES)],
+            'lot' => ['nullable', 'integer', 'min:1'],
         ]);
 
-        $export = Export::create([
-            'user_id' => $request->user()->id,
-            'event_id' => $event->id,
-            'pass_type_id' => $data['type'] ?? null,
-            'format' => $data['format'],
-            'total' => $event->passes()->when($data['type'] ?? null, fn ($query, $type) => $query->where('pass_type_id', $type))->count(),
-        ]);
-
-        app(AuditLogger::class)->record('export.qrcodes', 'Export des QR codes ('.strtoupper($export->format).')', $event, [
-            'format' => $export->format,
-            'type_id' => $export->pass_type_id,
-            'nombre' => $export->total,
-        ]);
-
-        GenerateQrCodesExport::dispatch($export);
-
-        return response()->json($export->fresh()->toProgress(), 202);
-    }
-
-    public function show(Request $request, Export $export): JsonResponse
-    {
-        $this->ensureOwner($request, $export);
-
-        return response()->json($export->toProgress());
-    }
-
-    public function download(Request $request, Export $export): BinaryFileResponse
-    {
-        $this->ensureOwner($request, $export);
-        abort_unless($export->status === 'done' && Storage::disk('local')->exists($export->file_path), 404, 'Ce fichier a expiré : relancez l\'export.');
-
-        return response()->download(Storage::disk('local')->path($export->file_path), $export->file_name);
-    }
-
-    private function ensureOwner(Request $request, Export $export): void
-    {
-        abort_unless($export->user_id === $request->user()->id || $request->user()->isOwner(), 403);
+        return [
+            isset($data['type']) ? PassType::find($data['type']) : null,
+            $data['format'],
+            (int) ($data['batch_size'] ?? 500),
+        ];
     }
 
     private function row(Pass $pass): array

@@ -49,9 +49,6 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::resource('users', UserController::class)->except(['show', 'destroy']);
         Route::get('users/{user}/scans', [UserScanController::class, 'index'])->name('users.scans');
 
-        Route::get('exports/{export}', [ExportController::class, 'show'])->name('exports.show');
-        Route::get('exports/{export}/download', [ExportController::class, 'download'])->name('exports.download');
-
         Route::resource('brands', BrandController::class)->only(['index', 'store', 'update', 'destroy']);
         Route::patch('brands/{brand}/toggle', [BrandController::class, 'toggle'])->name('brands.toggle');
 
@@ -72,7 +69,8 @@ Route::middleware(['auth', 'active'])->group(function () {
             Route::put('staff/{user}', [StaffController::class, 'update'])->name('staff.update');
             Route::delete('staff/{user}', [StaffController::class, 'destroy'])->name('staff.destroy');
 
-            Route::post('export/qrcodes', [ExportController::class, 'startQrCodes'])->name('export.qrcodes');
+            Route::get('export/qrcodes/lots', [ExportController::class, 'qrCodesPlan'])->name('export.qrcodes.plan');
+            Route::get('export/qrcodes', [ExportController::class, 'qrCodes'])->name('export.qrcodes');
         });
     });
 

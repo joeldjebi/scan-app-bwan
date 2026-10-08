@@ -15,7 +15,6 @@ cp .env.example .env && php artisan key:generate
 php artisan migrate --seed      # inclut les marques de véhicules (BrandSeeder)
 php artisan storage:link        # logos et affiches des événements
 php artisan serve
-php artisan queue:work          # exports de QR codes en arrière-plan (dans un 2e terminal)
 ```
 
 Le seeder crée `admin@passparking.test` / `password`, plus des données de démo en local (chef `chef@passparking.test`, agents `awa|moussa|fatou@passparking.test`, mot de passe `password`).

@@ -8,7 +8,10 @@ use App\Models\Event;
 use App\Models\Pass;
 use App\Models\PassType;
 use App\Models\User;
+use App\Services\PassGenerator;
+use App\Services\QrCodeExporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class BackOfficeTest extends TestCase
@@ -34,34 +37,68 @@ class BackOfficeTest extends TestCase
         $this->get(route('events.passes.index', $event))->assertOk()->assertSee('GALA26-VIP-0001');
     }
 
-    public function test_exports_qr_zip_in_background_and_spreadsheet(): void
+    public function test_exports_qr_zip_and_spreadsheet(): void
     {
+        Storage::fake('local');
         $admin = User::factory()->admin()->create();
         $pass = Pass::factory()->registered()->create();
 
-        $started = $this->actingAs($admin)
-            ->postJson(route('events.export.qrcodes', $pass->event_id), ['format' => 'svg'])
-            ->assertAccepted()
-            ->assertJsonPath('total', 1);
-
-        // En test, la file d'attente est synchrone : l'export est déjà terminé.
-        $status = $this->getJson($started->json('status_url'))
+        $plan = $this->actingAs($admin)
+            ->getJson(route('events.export.qrcodes.plan', [$pass->event_id, 'format' => 'svg', 'batch_size' => 0]))
             ->assertOk()
-            ->assertJsonPath('status', 'done')
-            ->assertJsonPath('processed', 1);
+            ->assertJsonPath('total', 1)
+            ->assertJsonCount(1, 'lots');
 
-        $response = $this->get($status->json('download_url'))->assertOk()->assertDownload();
+        $response = $this->get($plan->json('lots.0.url'))->assertOk()->assertDownload();
+        $zipPath = $response->baseResponse->getFile()->getPathname();
 
         $zip = new \ZipArchive;
-        $zip->open($response->baseResponse->getFile()->getPathname());
+        $zip->open($zipPath);
         $this->assertNotFalse($zip->getFromName("{$pass->type->code}/{$pass->number}.svg"));
         $this->assertStringContainsString($pass->url(), $zip->getFromName('passes.csv'));
         $zip->close();
 
-        // Un autre admin ne peut pas suivre ni télécharger cet export.
-        $this->actingAs(User::factory()->admin()->create())->getJson($started->json('status_url'))->assertForbidden();
+        // Le ZIP n'est qu'un fichier temporaire supprimé après l'envoi.
+        $this->assertTrue((fn () => $this->deleteFileAfterSend)->call($response->baseResponse));
+        $this->assertStringStartsWith(realpath(sys_get_temp_dir()), realpath($zipPath));
+        $this->assertSame([], Storage::disk('local')->allFiles('exports'));
 
-        $this->actingAs($admin)->get(route('events.export.passes', [$pass->event_id, 'format' => 'csv']))->assertOk();
+        $this->get(route('events.export.passes', [$pass->event_id, 'format' => 'csv']))->assertOk();
+    }
+
+    public function test_qr_export_is_split_into_lots_generated_on_demand(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $type = PassType::factory()->create(['code' => 'VIP']);
+        app(PassGenerator::class)->generate($type, 5);
+        $code = $type->event->code;
+
+        $exporter = app(QrCodeExporter::class);
+        $lots = $exporter->plan($type->event, $type, 'png', 2);
+
+        // Lots de 2 : 5 pass → 3 fichiers (2 + 2 + 1).
+        $this->assertSame([2, 2, 1], array_column($lots, 'count'));
+        $this->assertSame(["{$code}-VIP-0003", "{$code}-VIP-0004"], [$lots[1]['from'], $lots[1]['to']]);
+        $this->assertStringEndsWith('-vip-png-lot-02-3-4.zip', $lots[1]['name']);
+
+        $zip = $exporter->build($type->event, $type, 'png', 2, 3);
+        $archive = new \ZipArchive;
+        $archive->open($zip['path']);
+        $image = imagecreatefromstring($archive->getFromName("VIP/{$code}-VIP-0005.png"));
+        $archive->close();
+        unlink($zip['path']);
+
+        $this->assertNotFalse($image);
+        $this->assertGreaterThan(900, imagesx($image));
+        $this->assertSame(imagesx($image), imagesy($image));
+        $this->assertNull($exporter->build($type->event, $type, 'png', 2, 9));
+
+        $this->actingAs($admin)
+            ->getJson(route('events.export.qrcodes.plan', [$type->event_id, 'format' => 'png', 'type' => $type->id, 'batch_size' => 250]))
+            ->assertJsonCount(1, 'lots')
+            ->assertJsonPath('lots.0.count', 5);
+        $this->get(route('events.export.qrcodes', [$type->event_id, 'format' => 'png', 'batch_size' => 250, 'lot' => 9]))->assertNotFound();
+        $this->getJson(route('events.export.qrcodes.plan', [$type->event_id, 'format' => 'gif']))->assertJsonValidationErrors('format');
     }
 
     public function test_only_one_chief_per_event(): void
@@ -91,7 +128,7 @@ class BackOfficeTest extends TestCase
 
         // Pas d'accès aux fonctions d'administration ni aux autres événements.
         $this->get(route('events.create'))->assertForbidden();
-        $this->postJson(route('events.export.qrcodes', $event), ['format' => 'svg'])->assertForbidden();
+        $this->get(route('events.export.qrcodes', [$event, 'format' => 'svg']))->assertForbidden();
         $this->get(route('events.show', Event::factory()->create()))->assertForbidden();
     }
 

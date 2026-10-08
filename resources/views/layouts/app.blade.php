@@ -23,7 +23,7 @@
     <div id="app-loader" role="progressbar" aria-label="Chargement"></div>
     <div id="app-toasts" class="pointer-events-none fixed bottom-4 right-4 z-50 flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-2" aria-live="polite"></div>
     <div id="app-progress" hidden class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4 backdrop-blur-sm">
-        <div class="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-live="polite">
+        <div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl" role="dialog" aria-modal="true" aria-live="polite">
             <div class="flex items-center justify-between gap-3">
                 <p data-title class="font-semibold">Chargement…</p>
                 <p data-percent class="font-mono text-sm text-slate-500"></p>
@@ -32,6 +32,11 @@
                 <div data-bar class="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-500 transition-[width] duration-300"></div>
             </div>
             <p data-detail class="mt-3 text-sm text-slate-500"></p>
+            <ul data-files class="mt-4 max-h-64 space-y-2 overflow-y-auto empty:hidden"></ul>
+            <div data-actions hidden class="mt-4 flex justify-end gap-2">
+                <button type="button" data-download-all hidden class="rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Tout télécharger</button>
+                <button type="button" data-close class="rounded-lg border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50">Fermer</button>
+            </div>
         </div>
     </div>
 
