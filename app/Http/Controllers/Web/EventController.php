@@ -10,6 +10,7 @@ use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Event;
 use App\Models\User;
+use App\Services\AuditLogger;
 use App\Services\EventCodeGenerator;
 use App\Services\PosterPalette;
 use Illuminate\Http\JsonResponse;
@@ -91,6 +92,15 @@ class EventController extends Controller
     {
         if ($event->scans()->exists()) {
             return back()->with('error', 'Impossible de supprimer un événement qui a déjà des passages. Clôturez-le plutôt.');
+        }
+
+        $numbers = $event->passes()->withTrashed()->orderBy('id')->pluck('number');
+        if ($numbers->isNotEmpty()) {
+            app(AuditLogger::class)->record('pass.deleted', "{$numbers->count()} pass supprimé(s) avec l'événement « {$event->name} »", $event, [
+                'nombre' => $numbers->count(),
+                'vehicules' => $event->passes()->withTrashed()->has('vehicle')->count(),
+                'numeros' => $numbers->take(200)->all(),
+            ]);
         }
 
         $event->delete();

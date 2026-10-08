@@ -81,12 +81,18 @@ class AuditLogger
         return $token instanceof PersonalAccessToken ? $token->name : null;
     }
 
+    /**
+     * Événement de rattachement. Un événement qui vient d'être supprimé n'est pas rattaché
+     * (la clé étrangère le refuserait) : son nom reste dans la description et l'objet.
+     */
     private function eventIdOf(?Model $subject): ?int
     {
-        return match (true) {
-            $subject instanceof Event => $subject->id,
+        $eventId = match (true) {
+            $subject instanceof Event => $subject->exists ? $subject->id : null,
             $subject !== null && isset($subject->event_id) => $subject->event_id,
             default => null,
         };
+
+        return $eventId && Event::whereKey($eventId)->exists() ? $eventId : null;
     }
 }

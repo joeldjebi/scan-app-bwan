@@ -57,8 +57,15 @@ class PassTypeController extends Controller
             'count' => ['required', 'integer', 'min:1', 'max:'.config('parking.max_generation')],
         ]);
 
+        $before = (int) $passType->passes()->withTrashed()->max('sequence');
         $count = $generator->generate($passType, $data['count']);
-        app(AuditLogger::class)->record('pass.generated', "{$count} pass « {$passType->name} » générés", $passType, ['nombre' => $count]);
+        $created = $passType->passes()->where('sequence', '>', $before)->orderBy('sequence');
+
+        app(AuditLogger::class)->record('pass.generated', "{$count} pass « {$passType->name} » générés", $passType, [
+            'nombre' => $count,
+            'du' => $created->value('number'),
+            'au' => $created->reorder()->orderByDesc('sequence')->value('number'),
+        ]);
 
         return back()->with('success', "{$count} pass « {$passType->name} » générés.");
     }

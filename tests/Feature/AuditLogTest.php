@@ -4,9 +4,11 @@ namespace Tests\Feature;
 
 use App\Enums\StaffRole;
 use App\Models\AuditLog;
+use App\Models\Brand;
 use App\Models\Event;
 use App\Models\Pass;
 use App\Models\PassType;
+use App\Models\Scan;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Sanctum\Sanctum;
@@ -135,6 +137,55 @@ class AuditLogTest extends TestCase
         $forced = $this->lastLog('scan.forced');
         $this->assertSame('not_registered', $forced->properties['motif_refus']);
         $this->assertSame('Koffi', $forced->actor_name);
+    }
+
+    public function test_every_creation_deletion_and_export_is_logged(): void
+    {
+        $this->actingAs($this->owner);
+        $logged = fn (string $action) => AuditLog::where('action', $action)->exists();
+
+        // Création : événement, type, génération de pass (avec la plage de numéros), marque, compte
+        $this->post(route('events.store'), ['name' => 'Gala', 'starts_at' => '2026-12-01 18:00', 'ends_at' => '2026-12-01 23:00', 'status' => 'active']);
+        $event = Event::firstWhere('name', 'Gala');
+        $this->post(route('events.types.store', $event), ['name' => 'VIP', 'code' => 'VIP', 'color' => '#112233']);
+        $type = $event->passTypes()->first();
+        $this->post(route('events.types.generate', [$event, $type]), ['count' => 3]);
+        $this->post(route('brands.store'), ['name' => 'Lada']);
+        $this->post(route('users.store'), ['name' => 'Ali', 'phone' => '0700000009', 'role' => 'agent', 'password' => 'password123', 'password_confirmation' => 'password123', 'is_active' => 1]);
+
+        $generated = AuditLog::where('action', 'pass.generated')->firstOrFail();
+        $this->assertSame([3, "{$event->code}-VIP-0001", "{$event->code}-VIP-0003"], [$generated->properties['nombre'], $generated->properties['du'], $generated->properties['au']]);
+        foreach (['event.created', 'pass_type.created', 'brand.created', 'user.created'] as $action) {
+            $this->assertTrue($logged($action), "Action non journalisée : {$action}");
+        }
+
+        // Exports : liste des pass, lot de QR codes, journal
+        $this->get(route('events.export.passes', [$event, 'format' => 'xlsx']))->assertOk();
+        $this->get(route('events.export.qrcodes', [$event, 'format' => 'svg', 'batch_size' => 250, 'lot' => 1]))->assertOk();
+        $this->get(route('audit.export'))->assertOk();
+        foreach (['export.passes', 'export.qrcodes', 'export.audit'] as $action) {
+            $this->assertTrue($logged($action), "Export non journalisé : {$action}");
+        }
+
+        // Suppressions : passage, pass, marque, type vide, membre d'équipe, événement (avec ses pass)
+        $pass = $event->passes()->first();
+        $scan = Scan::create(['event_id' => $event->id, 'pass_id' => $pass->id, 'direction' => 'in', 'result' => 'granted', 'scanned_at' => now()]);
+        $this->delete(route('events.scans.destroy', [$event, $scan]));
+        $this->delete(route('events.passes.destroy', [$event, $pass]));
+        $this->delete(route('brands.destroy', Brand::firstWhere('name', 'Lada')));
+        $this->post(route('events.types.store', $event), ['name' => 'Presse', 'code' => 'PRS', 'color' => '#445566']);
+        $this->delete(route('events.types.destroy', [$event, $event->passTypes()->firstWhere('code', 'PRS')]));
+        $agent = User::firstWhere('name', 'Ali');
+        $this->post(route('events.staff.store', $event), ['user_ids' => [$agent->id], 'role' => 'agent']);
+        $this->delete(route('events.staff.destroy', [$event, $agent]));
+        foreach (['scan.deleted', 'pass.deleted', 'brand.deleted', 'pass_type.deleted', 'staff.removed'] as $action) {
+            $this->assertTrue($logged($action), "Suppression non journalisée : {$action}");
+        }
+
+        $this->delete(route('events.destroy', $event))->assertRedirect()->assertSessionHasNoErrors()->assertSessionMissing('error');
+        $this->assertTrue($logged('event.deleted'), 'Événement supprimé non journalisé : '.json_encode(AuditLog::pluck('action')));
+        $cascade = AuditLog::where('action', 'pass.deleted')->where('description', 'like', '%avec l\'événement%')->firstOrFail();
+        $this->assertSame(3, $cascade->properties['nombre']);
     }
 
     public function test_entries_are_immutable(): void

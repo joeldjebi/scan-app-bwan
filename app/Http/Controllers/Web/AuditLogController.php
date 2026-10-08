@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\AuditLog;
 use App\Models\Event;
 use App\Models\User;
+use App\Services\AuditLogger;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Request;
 use Illuminate\View\View;
@@ -57,6 +58,10 @@ class AuditLogController extends Controller
         ]));
 
         $writer->close();
+
+        app(AuditLogger::class)->record('export.audit', 'Export du journal (CSV)', properties: [
+            'filtres' => array_filter($request->only('q', 'category', 'channel', 'user', 'event', 'from', 'to', 'security')),
+        ]);
 
         return response()->download($path, 'journal-'.now()->format('Ymd-His').'.csv')->deleteFileAfterSend();
     }
