@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Pass Parking — API application agents
-  version: 1.6.0
+  version: 1.6.1
   description: |
     API REST de l'application mobile des **agents parking** et des **chefs agent parking**.
 
@@ -535,24 +535,30 @@ paths:
             schema:
               $ref: '#/components/schemas/ScanRequest'
             examples:
-              minimal_qr:
-                summary: Minimal — QR code scanné
-                description: Seul champ obligatoire (`code` ou `plate`). Remplacez la valeur par le contenu réel du QR code scanné.
-                value:
-                  code: https://scan.bwanservices.com/p/REMPLACER_PAR_LE_JETON
-              minimal_plaque:
-                summary: Minimal — immatriculation saisie
-                description: Saisie manuelle, dans n'importe quel format. Le passage est marqué « saisie manuelle ».
-                value:
-                  plate: 1234 VB 01
-              complet:
-                summary: Recommandé — avec la position de l'agent
-                description: La position GPS de l'agent est enregistrée avec le passage (facultative si indisponible).
+              qr_code:
+                summary: QR code scanné, avec la position de l'agent (cas standard)
+                description: |
+                  Remplacez `code` par le contenu réel du QR code scanné. La position GPS de l'agent
+                  (`latitude`, `longitude`, `accuracy` en mètres) est enregistrée avec le passage ;
+                  omettez ces 3 champs seulement si la localisation est indisponible.
                 value:
                   code: https://scan.bwanservices.com/p/REMPLACER_PAR_LE_JETON
                   latitude: 5.3197012
                   longitude: -4.0167293
                   accuracy: 12
+              plaque:
+                summary: Immatriculation saisie, avec la position de l'agent
+                description: Saisie manuelle (QR code oublié ou illisible), dans n'importe quel format. Le passage est marqué « saisie manuelle ».
+                value:
+                  plate: 1234 VB 01
+                  latitude: 5.3197012
+                  longitude: -4.0167293
+                  accuracy: 12
+              minimal:
+                summary: Minimal — sans position (localisation indisponible)
+                description: Seul `code` ou `plate` est obligatoire ; le passage est alors enregistré sans position.
+                value:
+                  plate: 1234 VB 01
               sortie:
                 summary: Imposer le sens (poste de sortie)
                 value:
@@ -861,6 +867,9 @@ paths:
                   result: granted
                   direction: out
                   scanned_at: '2026-10-14T21:47:05+00:00'
+                  latitude: 5.3198104
+                  longitude: -4.0169127
+                  accuracy: 9
                   device_id: A54-AWA
       responses:
         '200':
