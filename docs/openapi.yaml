@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Pass Parking — API application agents
-  version: 1.5.2
+  version: 1.6.0
   description: |
     API REST de l'application mobile des **agents parking** et des **chefs agent parking**.
 
@@ -46,8 +46,10 @@ info:
     - **Entrée ou sortie ?** Déduit automatiquement : un véhicule dehors entre, un véhicule dans le
       parking sort. Un pass permet un nombre illimité d'entrées/sorties. L'app peut imposer le sens
       avec `direction` (ex. agent posté à une sortie).
-    - Envoyez un **`client_uuid`** (UUID v4 généré par l'app) avec chaque validation : si le réseau
-      coupe et que l'app renvoie la requête, aucun doublon n'est créé.
+    - **Anti-doublon automatique** : si le même agent valide le même pass dans les **10 secondes**
+      (double appui, requête renvoyée après une coupure réseau), le serveur renvoie le passage déjà
+      enregistré (code `200`) au lieu d'en créer un second. L'app n'a rien à gérer.
+    - Seul `code` **ou** `plate` est obligatoire ; tous les autres champs de `POST /scans` sont facultatifs.
     - Envoyez la **position GPS** de l'agent (`latitude`, `longitude`, `accuracy` en mètres) avec
       chaque passage : l'administrateur la consulte dans l'historique de chaque agent. Demandez la
       permission de localisation à la connexion ; si la position est indisponible, omettez ces
@@ -108,10 +110,10 @@ info:
        Pour la saisie manuelle hors ligne, comparez la plaque saisie (sans espaces, tirets ni
        points, en majuscules) à `vehicle.plate_key`.
     2. Sans réseau : retrouvez le pass par `token`, appliquez les règles du §5, comparez le véhicule,
-       mettez à jour `presence` localement et mettez le passage en file d'attente avec un `client_uuid`
-       et l'heure du scan.
-    3. Au retour du réseau : `POST /scans/batch` (500 passages max). Idempotent : renvoyez le lot
-       tant que la réponse n'a pas été reçue.
+       mettez à jour `presence` localement et mettez le passage en file d'attente avec l'heure
+       réelle du scan (`scanned_at`).
+    3. Au retour du réseau : `POST /scans/batch` (500 passages max). Idempotent : renvoyez le même
+       lot tant que la réponse n'a pas été reçue, les passages déjà reçus sont ignorés.
 
     ## 7. Conventions
 
@@ -229,7 +231,7 @@ x-fixtures:
   ScanEntry:
     value: &ScanEntry
       id: 12
-      client_uuid: 6f1c1c1e-0b7e-4f7a-9d6e-2c1a3b4c5d6e
+      client_uuid: null
       direction: in
       result: granted
       method: qr
@@ -520,8 +522,8 @@ paths:
         - **Pass non valide** → `422` avec `reason` et `can_force`, rien n'est enregistré.
           Si `can_force = true`, le chef peut renvoyer la même requête avec `force: true` : le passage
           est alors enregistré avec `forced = true`.
-        - **Idempotence** : si `client_uuid` a déjà été reçu, le passage existant est renvoyé en `200`
-          sans rien modifier.
+        - **Anti-doublon** : la même validation (même agent, même pass) reçue de nouveau dans les
+          10 secondes renvoie le passage existant en `200`, sans rien modifier.
 
         *Optionnel* : `result = denied` permet de tracer un refus (ex. véhicule non conforme) dans
         l'historique ; la position du véhicule ne change pas. Si l'app ne propose pas de bouton
@@ -533,40 +535,42 @@ paths:
             schema:
               $ref: '#/components/schemas/ScanRequest'
             examples:
-              valider:
-                summary: Valider (cas standard, avec position)
+              minimal_qr:
+                summary: Minimal — QR code scanné
+                description: Seul champ obligatoire (`code` ou `plate`). Remplacez la valeur par le contenu réel du QR code scanné.
                 value:
-                  code: https://pass.exemple.com/p/o5kZFFrJ3NA8
-                  client_uuid: 6f1c1c1e-0b7e-4f7a-9d6e-2c1a3b4c5d6e
-                  device_id: A54-AWA
+                  code: https://scan.bwanservices.com/p/REMPLACER_PAR_LE_JETON
+              minimal_plaque:
+                summary: Minimal — immatriculation saisie
+                description: Saisie manuelle, dans n'importe quel format. Le passage est marqué « saisie manuelle ».
+                value:
+                  plate: 1234 VB 01
+              complet:
+                summary: Recommandé — avec la position de l'agent
+                description: La position GPS de l'agent est enregistrée avec le passage (facultative si indisponible).
+                value:
+                  code: https://scan.bwanservices.com/p/REMPLACER_PAR_LE_JETON
                   latitude: 5.3197012
                   longitude: -4.0167293
                   accuracy: 12
-              plaque:
-                summary: Valider par saisie de l'immatriculation
-                value:
-                  plate: 1000 AB 01
-                  client_uuid: 2b8f1c3e-7d4a-4e5f-9a6b-1c2d3e4f5a6b
               sortie:
                 summary: Imposer le sens (poste de sortie)
                 value:
-                  code: o5kZFFrJ3NA8
+                  plate: 1234 VB 01
                   direction: out
-                  client_uuid: 9a4e7d0c-1b2f-4c3d-8e5f-6a7b8c9d0e1f
               forcer:
                 summary: Forcer un pass non valide (chef)
+                description: Accepté seulement si `/verify` a renvoyé `can_force = true`.
                 value:
-                  code: 4I3a7T4VRBqQ
+                  code: https://scan.bwanservices.com/p/REMPLACER_PAR_LE_JETON
                   force: true
                   reason: Invité de dernière minute
-                  client_uuid: 3c2b1a09-8f7e-4d6c-9b5a-4e3d2c1b0a99
               refuser:
                 summary: Tracer un refus (optionnel)
                 value:
-                  code: o5kZFFrJ3NA8
+                  plate: 1234 VB 01
                   result: denied
                   reason: Plaque différente
-                  client_uuid: 0b9d6a52-8c1d-4a55-b0b5-7f6f2a7b1c11
       responses:
         '201':
           description: Passage enregistré.
@@ -578,7 +582,7 @@ paths:
                 scan: *ScanEntry
                 pass: *PassInside
         '200':
-          description: '`client_uuid` déjà reçu : le passage existant est renvoyé, rien n''est modifié.'
+          description: 'Doublon : même validation reçue il y a moins de 10 s (ou `client_uuid` déjà reçu). Le passage existant est renvoyé, rien n''est modifié.'
           content:
             application/json:
               schema:
@@ -653,7 +657,7 @@ paths:
                 data:
                   - *ScanEntry
                   - id: 11
-                    client_uuid: 1d2c3b4a-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+                    client_uuid: null
                     direction: in
                     result: denied
                     method: qr
@@ -833,7 +837,9 @@ paths:
           pass (`reason = unknown_pass` ou `not_assigned`).
         - Appliqués **par ordre chronologique** (`scanned_at`) : la position finale du véhicule est celle
           du dernier passage autorisé.
-        - **Idempotent** : un `client_uuid` déjà reçu est ignoré (`duplicate`).
+        - **Idempotent** : un passage déjà reçu est ignoré (`duplicate`). Il est reconnu par son
+          `client_uuid` s'il est fourni, sinon par l'agent, le pass, l'heure exacte (`scanned_at`) et le sens.
+        - `results[].index` indique la position du passage dans le lot envoyé.
         - Si la validation échoue (`422`), **aucun** passage du lot n'est enregistré.
       requestBody:
         required: true
@@ -843,8 +849,7 @@ paths:
               $ref: '#/components/schemas/BatchScanRequest'
             example:
               scans:
-                - client_uuid: 6f1c1c1e-0b7e-4f7a-9d6e-2c1a3b4c5d6e
-                  code: https://pass.exemple.com/p/o5kZFFrJ3NA8
+                - code: https://scan.bwanservices.com/p/REMPLACER_PAR_LE_JETON
                   result: granted
                   direction: in
                   scanned_at: '2026-10-14T18:03:12+00:00'
@@ -852,8 +857,7 @@ paths:
                   latitude: 5.3197012
                   longitude: -4.0167293
                   accuracy: 12
-                - client_uuid: 9a4e7d0c-1b2f-4c3d-8e5f-6a7b8c9d0e1f
-                  code: o5kZFFrJ3NA8
+                - plate: 1234 VB 01
                   result: granted
                   direction: out
                   scanned_at: '2026-10-14T21:47:05+00:00'
@@ -869,9 +873,11 @@ paths:
                 created: 1
                 duplicates: 1
                 results:
-                  - client_uuid: 6f1c1c1e-0b7e-4f7a-9d6e-2c1a3b4c5d6e
+                  - index: 0
+                    client_uuid: null
                     status: duplicate
-                  - client_uuid: 9a4e7d0c-1b2f-4c3d-8e5f-6a7b8c9d0e1f
+                  - index: 1
+                    client_uuid: null
                     status: created
         '401':
           $ref: '#/components/responses/Unauthenticated'
@@ -1425,7 +1431,9 @@ components:
           type: string
           format: uuid
           nullable: true
-          description: UUID généré par l'app — rend l'appel idempotent. **Fortement recommandé.**
+          description: |
+            Facultatif — inutile dans la plupart des cas : le serveur évite déjà les doublons (même agent,
+            même pass, moins de 10 s). Accepté pour les apps qui gèrent leur propre identifiant de requête.
         force:
           type: boolean
           default: false
@@ -1445,7 +1453,7 @@ components:
           type: string
           maxLength: 100
           nullable: true
-          description: Identifiant du terminal (traçabilité).
+          description: Facultatif. Identifiant libre du terminal (traçabilité), ex. modèle + prénom de l'agent.
         latitude:
           type: number
           format: double
@@ -1505,12 +1513,13 @@ components:
     BatchScanItem:
       type: object
       description: '`code` (QR code) **ou** `plate` (saisie manuelle).'
-      required: [client_uuid, result, direction, scanned_at]
+      required: [result, direction, scanned_at]
       properties:
         client_uuid:
           type: string
           format: uuid
-          description: Unique (clé d'idempotence).
+          nullable: true
+          description: Facultatif. Sans lui, un passage renvoyé est reconnu par agent + pass + `scanned_at` + sens.
         code:
           type: string
           maxLength: 500
@@ -1587,11 +1596,15 @@ components:
           description: Dans l'ordre chronologique de `scanned_at`.
           items:
             type: object
-            required: [client_uuid, status]
+            required: [index, client_uuid, status]
             properties:
+              index:
+                type: integer
+                description: Position du passage dans le lot envoyé (à partir de 0).
               client_uuid:
                 type: string
                 format: uuid
+                nullable: true
               status:
                 type: string
                 enum: [created, duplicate]

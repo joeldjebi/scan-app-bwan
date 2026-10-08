@@ -9,6 +9,7 @@ use App\Http\Resources\PassResource;
 use App\Http\Resources\ScanResource;
 use App\Models\Pass;
 use App\Models\Scan;
+use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\PassScanner;
 use Illuminate\Http\JsonResponse;
@@ -73,6 +74,11 @@ class ScanController extends Controller
         ['outcome' => $outcome, 'method' => $method, 'matches' => $matches] = $this->scanner->resolve($user, $data['code'] ?? null, $data['plate'] ?? null);
         $result = ScanResult::from($data['result'] ?? ScanResult::Granted->value);
 
+        // Même validation renvoyée (réseau instable, double appui) : on renvoie le passage existant.
+        if ($duplicate = $this->recentDuplicate($user, $outcome->pass, $result)) {
+            return $this->scanResponse($duplicate, 200);
+        }
+
         // Plaque présente sur plusieurs événements : l'app doit d'abord faire choisir le pass.
         if ($matches->isNotEmpty()) {
             return response()->json([
@@ -127,7 +133,7 @@ class ScanController extends Controller
     {
         $data = $request->validate([
             'scans' => ['required', 'array', 'max:500'],
-            'scans.*.client_uuid' => ['required', 'uuid', 'distinct'],
+            'scans.*.client_uuid' => ['nullable', 'uuid'],
             'scans.*.code' => ['required_without:scans.*.plate', 'nullable', 'string', 'max:500'],
             'scans.*.plate' => ['required_without:scans.*.code', 'nullable', 'string', 'max:20'],
             'scans.*.result' => ['required', Rule::enum(ScanResult::class)],
@@ -142,14 +148,27 @@ class ScanController extends Controller
         $user = $request->user();
 
         $results = collect($data['scans'])
+            ->map(fn (array $item, int $index) => [...$item, 'index' => $index])
             ->sortBy(fn ($item) => Carbon::parse($item['scanned_at'])->getTimestamp())
             ->map(function (array $item) use ($user) {
-                if ($this->existing($item['client_uuid'])) {
-                    return ['client_uuid' => $item['client_uuid'], 'status' => 'duplicate'];
-                }
+                $uuid = $item['client_uuid'] ?? null;
+                $scannedAt = Carbon::parse($item['scanned_at'])->timezone(config('app.timezone'));
 
                 // La décision prise hors ligne est conservée ; seul le rattachement à l'événement est contrôlé.
                 ['outcome' => $outcome, 'method' => $method] = $this->scanner->resolve($user, $item['code'] ?? null, $item['plate'] ?? null);
+
+                // Lot renvoyé : reconnu par client_uuid, ou à défaut par agent + pass + heure exacte + sens.
+                $alreadyReceived = $uuid
+                    ? $this->existing($uuid)
+                    : Scan::where('user_id', $user->id)
+                        ->where('pass_id', $outcome->pass?->id)
+                        ->where('scanned_at', $scannedAt)
+                        ->where('direction', $item['direction'])
+                        ->exists();
+
+                if ($alreadyReceived) {
+                    return ['index' => $item['index'], 'client_uuid' => $uuid, 'status' => 'duplicate'];
+                }
 
                 $this->scanner->record($user, $outcome->pass, ScanResult::from($item['result']), [
                     'direction' => Direction::from($item['direction']),
@@ -158,13 +177,14 @@ class ScanController extends Controller
                     'forced' => $item['forced'] ?? false,
                     'offline' => true,
                     'device_id' => $item['device_id'] ?? null,
-                    'client_uuid' => $item['client_uuid'],
+                    'client_uuid' => $uuid,
                     ...self::location($item),
-                    'scanned_at' => Carbon::parse($item['scanned_at'])->timezone(config('app.timezone')),
+                    'scanned_at' => $scannedAt,
                 ]);
 
-                return ['client_uuid' => $item['client_uuid'], 'status' => 'created'];
+                return ['index' => $item['index'], 'client_uuid' => $uuid, 'status' => 'created'];
             })
+            ->sortBy('index')
             ->values();
 
         app(AuditLogger::class)->record('scan.batch', "Envoi de {$results->count()} passage(s) effectués hors ligne", properties: [
@@ -244,6 +264,25 @@ class ScanController extends Controller
             'longitude' => isset($data['longitude']) ? (float) $data['longitude'] : null,
             'location_accuracy' => isset($data['accuracy']) ? (float) $data['accuracy'] : null,
         ];
+    }
+
+    /**
+     * Passage identique (même agent, même pass, même résultat) enregistré il y a moins de
+     * `parking.scan_dedup_seconds` secondes.
+     */
+    private function recentDuplicate(User $user, ?Pass $pass, ScanResult $result): ?Scan
+    {
+        if (! $pass) {
+            return null;
+        }
+
+        return Scan::where('user_id', $user->id)
+            ->where('pass_id', $pass->id)
+            ->where('result', $result)
+            ->where('offline', false)
+            ->where('scanned_at', '>=', now()->subSeconds(config('parking.scan_dedup_seconds')))
+            ->latest('id')
+            ->first();
     }
 
     private function existing(?string $clientUuid): ?Scan

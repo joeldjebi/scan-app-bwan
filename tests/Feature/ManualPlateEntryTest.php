@@ -58,6 +58,7 @@ class ManualPlateEntryTest extends TestCase
         $this->assertSame(ScanMethod::Plate, Scan::firstOrFail()->method);
         $this->assertSame(Direction::In, $this->pass->fresh()->presence);
 
+        $this->travel(1)->minutes();
         $this->postJson('/api/v1/scans', ['code' => $this->pass->token])->assertJsonPath('scan.method', 'qr');
     }
 

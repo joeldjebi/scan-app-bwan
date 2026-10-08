@@ -119,6 +119,7 @@ class ScanApiTest extends TestCase
         Sanctum::actingAs($this->agent);
 
         foreach (['in', 'out', 'in'] as $expected) {
+            $this->travel(1)->minutes();
             $this->postJson('/api/v1/scans', ['code' => $pass->token])
                 ->assertCreated()
                 ->assertJsonPath('scan.result', 'granted')
@@ -181,6 +182,48 @@ class ScanApiTest extends TestCase
 
         $this->assertSame(1, $pass->scans()->count());
         $this->assertSame(Direction::In, $pass->fresh()->presence);
+    }
+
+    public function test_repeated_validation_within_seconds_is_not_duplicated(): void
+    {
+        $pass = $this->pass();
+        Sanctum::actingAs($this->agent);
+
+        // Double appui ou requête renvoyée après une coupure, sans client_uuid.
+        $first = $this->postJson('/api/v1/scans', ['code' => $pass->token])->assertCreated();
+        $this->travel(5)->seconds();
+        $this->postJson('/api/v1/scans', ['code' => $pass->token])
+            ->assertOk()
+            ->assertJsonPath('scan.id', $first->json('scan.id'));
+
+        $this->assertSame(1, $pass->scans()->count());
+        $this->assertSame(Direction::In, $pass->fresh()->presence);
+
+        // Passé le délai, c'est un nouveau passage (sortie).
+        $this->travel(config('parking.scan_dedup_seconds') + 1)->seconds();
+        $this->postJson('/api/v1/scans', ['code' => $pass->token])->assertCreated()->assertJsonPath('scan.direction', 'out');
+    }
+
+    public function test_offline_batch_without_client_uuid_is_not_duplicated_when_resent(): void
+    {
+        $pass = $this->pass();
+        Sanctum::actingAs($this->agent);
+        $scans = [
+            ['code' => $pass->token, 'result' => 'granted', 'direction' => 'in', 'scanned_at' => now()->subMinutes(10)->toIso8601String()],
+            ['plate' => $pass->vehicle->plate, 'result' => 'granted', 'direction' => 'out', 'scanned_at' => now()->subMinutes(2)->toIso8601String()],
+        ];
+
+        $this->postJson('/api/v1/scans/batch', ['scans' => $scans])
+            ->assertOk()
+            ->assertJsonPath('created', 2)
+            ->assertJsonPath('results.0.index', 0)
+            ->assertJsonPath('results.1.index', 1);
+
+        $this->postJson('/api/v1/scans/batch', ['scans' => $scans])
+            ->assertJsonPath('created', 0)
+            ->assertJsonPath('duplicates', 2);
+
+        $this->assertSame(2, $pass->scans()->count());
     }
 
     public function test_history_lists_only_my_scans(): void

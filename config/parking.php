@@ -8,6 +8,10 @@ return [
     */
     'token_length' => 12,
 
+    // Anti-doublon : une même validation (même agent, même pass) reçue de nouveau dans ce
+    // délai (secondes) renvoie le passage déjà enregistré au lieu d'en créer un second.
+    'scan_dedup_seconds' => 10,
+
     // Nombre maximum de pass générés en une seule opération.
     'max_generation' => 5000,
 

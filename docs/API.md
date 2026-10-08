@@ -24,7 +24,7 @@
 | GET | `/auth/me` | tous | Vérifie que le token est valide |
 | POST | `/auth/logout` | tous | Révoque le token |
 | POST | `/verify` | tous | `{code}` **ou** `{plate}` → `{valid, reason, message, method, can_force, event, pass, matches}`. N'enregistre rien. |
-| POST | `/scans` | tous | `{code, client_uuid}` → valide le passage (sens automatique). `422` si le pass n'est pas valide. |
+| POST | `/scans` | tous | `{code}` ou `{plate}` → valide le passage (sens automatique). `422` si le pass n'est pas valide. Anti-doublon automatique (même pass, même agent, moins de 10 s). |
 | GET | `/scans/history` | tous | Mes passages, 30 par page |
 | GET | `/events` | chef | Ses événements, avec `can_supervise` |
 | GET | `/events/{id}/stats` | chef | Compteurs de l'événement |
@@ -35,7 +35,7 @@
 ## Parcours
 
 1. Scan → `POST /verify { code: "<contenu brut du QR>" }`
-2. Si `valid = true` : afficher le type (couleur), l'**immatriculation**, la marque, la couleur et le sens (`next_direction`), puis le bouton **Valider** → `POST /scans { code, client_uuid, latitude, longitude, accuracy }`. La position GPS de l'agent est enregistrée à chaque passage (facultative si indisponible).
+2. Si `valid = true` : afficher le type (couleur), l'**immatriculation**, la marque, la couleur et le sens (`next_direction`), puis le bouton **Valider** → `POST /scans { code, latitude, longitude, accuracy }`. La position GPS de l'agent est enregistrée à chaque passage (facultative si indisponible).
 **QR code illisible ou oublié** : l'agent saisit l'immatriculation et l'app envoie `plate` à la place de `code`, sur les mêmes routes. Le format est libre (`1234 AB 01` = `1234-ab-01` = `1234ab01`), et le passage est marqué « saisie manuelle » dans les historiques.
 
 3. Si `valid = false` : afficher `message`. Si `can_force = true` (chef) : bouton **Forcer** → `POST /scans { code, force: true }`.
