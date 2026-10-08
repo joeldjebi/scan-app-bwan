@@ -40,14 +40,22 @@ class UserController extends Controller
         return redirect()->route('users.index')->with('success', 'Compte créé.');
     }
 
-    public function edit(User $user): View
+    public function edit(Request $request, User $user): View
     {
+        $this->ensureCanManage($request, $user);
+
         return view('users.form', compact('user'));
     }
 
     public function update(Request $request, User $user): RedirectResponse
     {
+        $this->ensureCanManage($request, $user);
+
         $data = $this->validated($request, $user);
+
+        if ($user->isOwner() && (! $data['is_active'] || $data['role'] !== UserRole::Admin->value)) {
+            return back()->with('error', 'Le compte propriétaire reste toujours administrateur et actif.');
+        }
 
         if ($user->is($request->user()) && (! $data['is_active'] || $data['role'] !== UserRole::Admin->value)) {
             return back()->with('error', 'Vous ne pouvez pas retirer vos propres droits administrateur.');
@@ -64,6 +72,14 @@ class UserController extends Controller
         }
 
         return redirect()->route('users.index')->with('success', 'Compte mis à jour.');
+    }
+
+    /**
+     * Le compte propriétaire n'est modifiable que par lui-même.
+     */
+    private function ensureCanManage(Request $request, User $user): void
+    {
+        abort_unless($request->user()->canManage($user), 403, 'Seul le propriétaire peut modifier ce compte.');
     }
 
     private function validated(Request $request, ?User $user = null): array

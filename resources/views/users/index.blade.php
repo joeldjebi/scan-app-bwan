@@ -28,7 +28,12 @@
             <tbody class="divide-y divide-slate-100">
                 @foreach ($users as $user)
                     <tr>
-                        <td class="px-4 py-2 font-medium">{{ $user->name }}</td>
+                        <td class="px-4 py-2 font-medium">
+                            {{ $user->name }}
+                            @if ($user->isOwner())
+                                <span class="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800" title="Compte protégé : seul son titulaire peut le modifier">Propriétaire</span>
+                            @endif
+                        </td>
                         <td class="px-4 py-2 font-mono">{{ $user->phone ?? '—' }}</td>
                         <td class="px-4 py-2">{{ $user->email ?? '—' }}</td>
                         <td class="px-4 py-2">{{ $user->role->label() }}</td>
@@ -39,7 +44,11 @@
                         <td class="whitespace-nowrap px-4 py-2 text-right">
                             <a href="{{ route('users.scans', $user) }}" class="text-indigo-600 hover:underline">Historique</a>
                             <span class="text-slate-300">·</span>
-                            <a href="{{ route('users.edit', $user) }}" class="text-indigo-600 hover:underline">Modifier</a>
+                            @if (auth()->user()->canManage($user))
+                                <a href="{{ route('users.edit', $user) }}" class="text-indigo-600 hover:underline">Modifier</a>
+                            @else
+                                <span class="text-slate-400" title="Seul le propriétaire peut modifier ce compte">Protégé</span>
+                            @endif
                         </td>
                     </tr>
                 @endforeach

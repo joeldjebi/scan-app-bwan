@@ -13,7 +13,9 @@
                     @unless ($user->is_active) · <span class="text-red-600">compte désactivé</span> @endunless
                 </p>
             </div>
-            <a href="{{ route('users.edit', $user) }}" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">Modifier le compte</a>
+            @if (auth()->user()->canManage($user))
+                <a href="{{ route('users.edit', $user) }}" class="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm hover:bg-slate-50">Modifier le compte</a>
+            @endif
         </div>
     </div>
 

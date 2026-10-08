@@ -52,6 +52,11 @@ class UserFactory extends Factory
         return $this->state(fn (array $attributes) => ['role' => UserRole::Admin]);
     }
 
+    public function owner(): static
+    {
+        return $this->state(fn (array $attributes) => ['role' => UserRole::Admin, 'is_owner' => true]);
+    }
+
     public function inactive(): static
     {
         return $this->state(fn (array $attributes) => ['is_active' => false]);

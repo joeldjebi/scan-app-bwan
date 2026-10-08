@@ -33,7 +33,33 @@ class User extends Authenticatable
             'password' => 'hashed',
             'role' => UserRole::class,
             'is_active' => 'boolean',
+            'is_owner' => 'boolean',
         ];
+    }
+
+    /**
+     * Le propriétaire (premier administrateur) ne peut jamais être supprimé.
+     */
+    protected static function booted(): void
+    {
+        static::deleting(function (User $user) {
+            if ($user->is_owner) {
+                throw new \LogicException('Le compte propriétaire ne peut pas être supprimé.');
+            }
+        });
+    }
+
+    public function isOwner(): bool
+    {
+        return $this->is_owner;
+    }
+
+    /**
+     * Seul le propriétaire peut modifier son propre compte.
+     */
+    public function canManage(User $account): bool
+    {
+        return $this->isAdmin() && (! $account->isOwner() || $this->is($account));
     }
 
     /**
