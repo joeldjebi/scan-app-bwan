@@ -1,0 +1,1637 @@
+openapi: 3.0.3
+
+info:
+  title: Pass Parking — API application agents
+  version: 1.4.0
+  description: |
+    API REST de l'application mobile des **agents parking** et des **chefs agent parking**.
+
+    L'application est volontairement simple. L'agent peut seulement :
+    1. **scanner** le QR code d'un pass pour le **vérifier** ;
+    2. **valider** l'entrée ou la sortie du véhicule ;
+    3. consulter **l'historique des passages qu'il a effectués**.
+
+    Le chef agent parking fait la même chose, et dispose en plus de la **supervision** de son événement
+    (statistiques, historique de tous les passages) et du **passage forcé**.
+
+    ---
+
+    ## 1. Aucun choix d'événement côté app
+
+    L'agent ne sélectionne **jamais** d'événement. Chaque QR code identifie un pass, qui appartient à
+    un événement : **le serveur vérifie lui-même** que l'agent est affecté (comme agent ou chef) à
+    l'événement de ce pass. Un pass d'un événement auquel l'agent n'est pas affecté est refusé
+    (`reason = not_assigned`) et ses données ne sont pas révélées.
+
+    ## 2. Parcours d'un contrôle
+
+    ```
+    Scan du QR code
+         │
+         ▼
+    POST /verify ──► valid = false ──► écran ROUGE : message
+         │                              └─ si can_force = true (chef) : bouton « Forcer »
+         │                                   → POST /scans { force: true }
+         │ valid = true
+         ▼
+    Écran VERT : type de pass (couleur), IMMATRICULATION, marque, couleur,
+                 sens prévu (next_direction : ENTRÉE / SORTIE)
+         │
+         └─ l'agent compare avec le véhicule et appuie sur « Valider »
+              → POST /scans { code }   ──► 201 : passage enregistré
+    ```
+
+    - `POST /verify` **n'enregistre rien** : il peut être rappelé sans risque.
+    - `POST /scans` **revérifie tout** côté serveur : l'app n'a pas besoin de renvoyer le résultat de `verify`.
+    - **Entrée ou sortie ?** Déduit automatiquement : un véhicule dehors entre, un véhicule dans le
+      parking sort. Un pass permet un nombre illimité d'entrées/sorties. L'app peut imposer le sens
+      avec `direction` (ex. agent posté à une sortie).
+    - Envoyez un **`client_uuid`** (UUID v4 généré par l'app) avec chaque validation : si le réseau
+      coupe et que l'app renvoie la requête, aucun doublon n'est créé.
+    - Envoyez la **position GPS** de l'agent (`latitude`, `longitude`, `accuracy` en mètres) avec
+      chaque passage : l'administrateur la consulte dans l'historique de chaque agent. Demandez la
+      permission de localisation à la connexion ; si la position est indisponible, omettez ces
+      champs (le passage est quand même enregistré).
+
+    ## 3. Contenu du QR code
+
+    Envoyez le contenu **brut** du QR code dans `code` :
+    - URL complète : `https://pass.exemple.com/p/o5kZFFrJ3NA8` ;
+    - ou jeton seul : `o5kZFFrJ3NA8`.
+
+    Tout autre contenu renvoie `reason = unknown_pass`.
+
+    ## 4. Droits
+
+    | Action | Agent | Chef agent parking | Admin |
+    |---|---|---|---|
+    | `POST /verify`, `POST /scans` (pass de ses événements) | ✅ | ✅ | ✅ tous |
+    | Forcer un pass non valide (`force: true`) | ❌ | ✅ son événement | ✅ |
+    | `GET /scans/history` (ses propres passages) | ✅ | ✅ | ✅ |
+    | `GET /events`, `/events/{event}/stats`, `/events/{event}/scans` | ❌ | ✅ son événement | ✅ |
+    | `GET /sync`, `POST /scans/batch` (hors ligne) | ✅ | ✅ | ✅ |
+
+    Pour savoir s'il faut afficher l'onglet **Supervision**, appelez `GET /events` : il n'est utile que
+    si au moins un événement a `can_supervise = true`.
+
+    ## 5. Motifs de refus (`reason`)
+
+    | reason | Message (champ `message`) | Pass renvoyé | Forçable par le chef |
+    |---|---|---|---|
+    | `unknown_pass` | QR code inconnu. | non | non |
+    | `not_assigned` | Vous n'êtes pas affecté à l'événement de ce pass. | non | non |
+    | `event_closed` | L'événement est clôturé. | oui | **non** (aucune exception) |
+    | `not_registered` | Aucun véhicule n'est enregistré sur ce pass. | oui | oui |
+    | `revoked` | Ce pass a été révoqué. | oui | oui |
+
+    Affichez `message` (en français) ; utilisez `reason` et `can_force` pour la logique de l'app.
+
+    ## 6. Mode hors ligne (optionnel)
+
+    1. Quand le réseau est disponible : `GET /sync` (première fois), puis `GET /sync?since=<server_time>`.
+       Une seule synchro couvre **tous** les événements de l'agent. Fusionnez les pass par `id`.
+    2. Sans réseau : retrouvez le pass par `token`, appliquez les règles du §5, comparez le véhicule,
+       mettez à jour `presence` localement et mettez le passage en file d'attente avec un `client_uuid`
+       et l'heure du scan.
+    3. Au retour du réseau : `POST /scans/batch` (500 passages max). Idempotent : renvoyez le lot
+       tant que la réponse n'a pas été reçue.
+
+    ## 7. Conventions
+
+    - **En-têtes** : `Accept: application/json` sur **toutes** les requêtes ;
+      `Content-Type: application/json` pour les corps.
+    - **Connexion** : **numéro de téléphone + mot de passe** (`POST /auth/login`). Le numéro est
+      reconnu quel que soit le format saisi (espaces, points, tirets) mais l'indicatif doit être le même
+      que celui enregistré par l'administrateur (`+225 07…` et `07…` sont deux numéros différents).
+    - **Authentification** : `Authorization: Bearer <token>` (via `POST /auth/login`). Le token
+      n'expire pas ; il est invalidé par `POST /auth/logout` ou si le compte est désactivé (`403`).
+    - **Dates** : ISO 8601 UTC en sortie (`2026-10-14T18:00:00.000000Z`) ; en entrée, tout ISO 8601
+      avec fuseau (`2026-10-14T18:03:12+00:00`).
+    - **Erreurs** : `401` → retour à l'écran de connexion ; `403` compte désactivé → idem ;
+      `422` → `message` à afficher (`errors` détaille les champs en cas de validation).
+
+  contact:
+    name: Équipe Pass Parking
+  license:
+    name: Propriétaire — usage interne
+
+# Données d'exemple réutilisées (ancres YAML) : chaque outil les développe en exemples littéraux.
+x-fixtures:
+  EventRef:
+    value: &EventRef
+      id: 1
+      name: Festival de démonstration
+  EventChief:
+    value: &EventChief
+      id: 1
+      name: Festival de démonstration
+      code: DEMO26
+      location: Palais de la Culture
+      starts_at: '2026-10-14T18:00:00.000000Z'
+      ends_at: '2026-10-14T23:59:00.000000Z'
+      status: active
+      my_role: chief
+      can_supervise: true
+      pass_types:
+        - { id: 1, name: VIP, code: VIP, color: '#b45309' }
+        - { id: 2, name: Staff, code: STF, color: '#059669' }
+        - { id: 3, name: Presse, code: PRS, color: '#7c3aed' }
+  EventAgent:
+    value: &EventAgent
+      id: 1
+      name: Festival de démonstration
+      code: DEMO26
+      location: Palais de la Culture
+      starts_at: '2026-10-14T18:00:00.000000Z'
+      ends_at: '2026-10-14T23:59:00.000000Z'
+      status: active
+      my_role: agent
+      can_supervise: false
+      pass_types:
+        - { id: 1, name: VIP, code: VIP, color: '#b45309' }
+  PassRegistered:
+    value: &PassRegistered
+      id: 1
+      event_id: 1
+      number: DEMO26-VIP-0001
+      token: o5kZFFrJ3NA8
+      status: registered
+      status_label: Enregistré
+      presence: out
+      next_direction: in
+      type: { id: 1, name: VIP, code: VIP, color: '#b45309' }
+      vehicle: { plate: 1000 AB 01, brand: Mercedes-Benz, color: Bordeaux, phone: '+2250718898224' }
+      registered_at: '2026-10-07T15:39:44.000000Z'
+      last_scanned_at: null
+      updated_at: '2026-10-07T15:39:44.000000Z'
+  PassInside:
+    value: &PassInside
+      id: 1
+      event_id: 1
+      number: DEMO26-VIP-0001
+      token: o5kZFFrJ3NA8
+      status: registered
+      status_label: Enregistré
+      presence: in
+      next_direction: out
+      type: { id: 1, name: VIP, code: VIP, color: '#b45309' }
+      vehicle: { plate: 1000 AB 01, brand: Mercedes-Benz, color: Bordeaux, phone: '+2250718898224' }
+      registered_at: '2026-10-07T15:39:44.000000Z'
+      last_scanned_at: '2026-10-14T18:03:12.000000Z'
+      updated_at: '2026-10-14T18:03:12.000000Z'
+  PassPending:
+    value: &PassPending
+      id: 9
+      event_id: 1
+      number: DEMO26-VIP-0009
+      token: 4I3a7T4VRBqQ
+      status: pending
+      status_label: En attente d'enregistrement
+      presence: out
+      next_direction: in
+      type: { id: 1, name: VIP, code: VIP, color: '#b45309' }
+      vehicle: null
+      registered_at: null
+      last_scanned_at: null
+      updated_at: '2026-10-07T15:39:40.000000Z'
+  PassRevoked:
+    value: &PassRevoked
+      id: 2
+      event_id: 1
+      number: DEMO26-VIP-0002
+      token: eygFQ9ilUEI8
+      status: revoked
+      status_label: Révoqué
+      presence: out
+      next_direction: in
+      type: { id: 1, name: VIP, code: VIP, color: '#b45309' }
+      vehicle: { plate: 1001 AB 01, brand: Hyundai, color: Gris, phone: '+2250712345678' }
+      registered_at: '2026-10-07T15:39:44.000000Z'
+      last_scanned_at: null
+      updated_at: '2026-10-08T09:12:00.000000Z'
+  ScanEntry:
+    value: &ScanEntry
+      id: 12
+      client_uuid: 6f1c1c1e-0b7e-4f7a-9d6e-2c1a3b4c5d6e
+      direction: in
+      result: granted
+      reason: null
+      forced: false
+      offline: false
+      scanned_at: '2026-10-14T18:03:12.000000Z'
+      location: { latitude: 5.3197012, longitude: -4.0167293, accuracy: 12 }
+      event: { id: 1, name: Festival de démonstration }
+      pass:
+        id: 1
+        number: DEMO26-VIP-0001
+        plate: 1000 AB 01
+        type: { name: VIP, color: '#b45309' }
+
+servers:
+  - url: /api/v1
+    description: Serveur courant
+
+tags:
+  - name: Authentification
+    description: Connexion de l'agent et gestion du token.
+  - name: Contrôle
+    description: Scanner, vérifier et valider l'entrée / la sortie d'un véhicule. **Agents et chefs.**
+  - name: Historique
+    description: Passages effectués par l'utilisateur connecté. **Agents et chefs.**
+  - name: Supervision
+    description: Réservé au **chef agent parking** de l'événement (et aux administrateurs).
+  - name: Hors ligne
+    description: Optionnel — synchronisation des pass et envoi différé des passages.
+
+security:
+  - bearerAuth: []
+
+paths:
+
+  /auth/login:
+    post:
+      tags: [Authentification]
+      operationId: login
+      summary: Se connecter
+      description: |
+        Échange le **numéro de téléphone** et le mot de passe contre un **token d'accès**, à stocker de façon sécurisée
+        (Keychain / Keystore). Chaque appareil reçoit son propre token (`device_name`).
+
+        Limité à **10 tentatives par minute** (au-delà : `429`).
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+            example:
+              phone: '+225 07 02 02 02 00'
+              password: password
+              device_name: Samsung A54 - Awa
+      responses:
+        '200':
+          description: Connexion réussie.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResponse'
+              example:
+                token: 3|kV8XyQm2fP0aLr7sT1uW9bZc4dE6gH5jK2nM8pQ0
+                user:
+                  id: 3
+                  name: Awa Agent
+                  email: null
+                  phone: '+2250702020200'
+                  role: agent
+        '422':
+          description: Champs manquants, identifiants incorrects ou compte désactivé.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              examples:
+                identifiants:
+                  summary: Téléphone ou mot de passe incorrect
+                  value:
+                    message: Numéro de téléphone ou mot de passe incorrect.
+                    errors:
+                      phone: [Numéro de téléphone ou mot de passe incorrect.]
+                desactive:
+                  summary: Compte désactivé
+                  value:
+                    message: Votre compte est désactivé.
+                    errors:
+                      phone: [Votre compte est désactivé.]
+                validation:
+                  summary: Champ manquant
+                  value:
+                    message: Le champ nom de l'appareil est obligatoire.
+                    errors:
+                      device_name: [Le champ nom de l'appareil est obligatoire.]
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /auth/me:
+    get:
+      tags: [Authentification]
+      operationId: me
+      summary: Utilisateur connecté
+      description: À appeler au démarrage de l'app pour vérifier que le token stocké est toujours valide.
+      responses:
+        '200':
+          description: Utilisateur connecté.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [user]
+                properties:
+                  user:
+                    $ref: '#/components/schemas/User'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDisabled'
+
+  /auth/logout:
+    post:
+      tags: [Authentification]
+      operationId: logout
+      summary: Se déconnecter
+      description: Révoque le token utilisé pour l'appel. Les autres appareils de l'agent restent connectés.
+      responses:
+        '200':
+          description: Token révoqué.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+              example:
+                message: Déconnecté.
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDisabled'
+
+  /verify:
+    post:
+      tags: [Contrôle]
+      operationId: verifyPass
+      summary: Vérifier un QR code
+      description: |
+        **Étape 1.** Le serveur retrouve le pass, son événement, vérifie que l'utilisateur y est affecté
+        puis contrôle le pass. **N'enregistre aucun passage.**
+
+        Réponse toujours `200` si la requête est bien formée : testez `valid`.
+
+        **Écran conseillé quand `valid = true`** :
+        - bandeau à la couleur `pass.type.color` avec `pass.type.name` et `event.name` ;
+        - **immatriculation en très grand** (`pass.vehicle.plate`), puis marque et couleur ;
+        - sens prévu : `pass.next_direction` (`in` → « ENTRÉE », `out` → « SORTIE ») ;
+        - bouton **Valider**.
+
+        **Quand `valid = false`** : afficher `message`. Si `can_force = true` (chef de l'événement),
+        proposer « Forcer le passage ».
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VerifyRequest'
+            examples:
+              url:
+                summary: Contenu brut du QR code (recommandé)
+                value:
+                  code: https://pass.exemple.com/p/o5kZFFrJ3NA8
+              token:
+                summary: Jeton seul
+                value:
+                  code: o5kZFFrJ3NA8
+      responses:
+        '200':
+          description: Résultat de la vérification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VerifyResponse'
+              examples:
+                valide:
+                  summary: Pass valide (véhicule dehors → entrée)
+                  value:
+                    valid: true
+                    reason: null
+                    message: Pass valide.
+                    can_force: false
+                    event: *EventRef
+                    pass: *PassRegistered
+                non_enregistre_agent:
+                  summary: Aucun véhicule enregistré (agent)
+                  value:
+                    valid: false
+                    reason: not_registered
+                    message: Aucun véhicule n'est enregistré sur ce pass.
+                    can_force: false
+                    event: *EventRef
+                    pass: *PassPending
+                revoque_chef:
+                  summary: Pass révoqué (chef → peut forcer)
+                  value:
+                    valid: false
+                    reason: revoked
+                    message: Ce pass a été révoqué.
+                    can_force: true
+                    event: *EventRef
+                    pass: *PassRevoked
+                non_affecte:
+                  summary: Pass d'un événement auquel l'agent n'est pas affecté
+                  value:
+                    valid: false
+                    reason: not_assigned
+                    message: Vous n'êtes pas affecté à l'événement de ce pass.
+                    can_force: false
+                    event: null
+                    pass: null
+                inconnu:
+                  summary: QR code inconnu
+                  value:
+                    valid: false
+                    reason: unknown_pass
+                    message: QR code inconnu.
+                    can_force: false
+                    event: null
+                    pass: null
+                cloture:
+                  summary: Événement clôturé
+                  value:
+                    valid: false
+                    reason: event_closed
+                    message: L'événement est clôturé.
+                    can_force: false
+                    event: *EventRef
+                    pass: *PassRegistered
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDisabled'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /scans:
+    post:
+      tags: [Contrôle]
+      operationId: validateScan
+      summary: Valider l'entrée / la sortie
+      description: |
+        **Étape 2.** Enregistre le passage. Le serveur **refait toutes les vérifications** de `/verify`.
+
+        - **Sens** : si `direction` est absent, il est déduit (`next_direction` du pass).
+        - **Pass valide** → `201`, le passage est enregistré et la position du véhicule (`pass.presence`)
+          est mise à jour.
+        - **Pass non valide** → `422` avec `reason` et `can_force`, rien n'est enregistré.
+          Si `can_force = true`, le chef peut renvoyer la même requête avec `force: true` : le passage
+          est alors enregistré avec `forced = true`.
+        - **Idempotence** : si `client_uuid` a déjà été reçu, le passage existant est renvoyé en `200`
+          sans rien modifier.
+
+        *Optionnel* : `result = denied` permet de tracer un refus (ex. véhicule non conforme) dans
+        l'historique ; la position du véhicule ne change pas. Si l'app ne propose pas de bouton
+        « Refuser », ne l'envoyez jamais.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanRequest'
+            examples:
+              valider:
+                summary: Valider (cas standard, avec position)
+                value:
+                  code: https://pass.exemple.com/p/o5kZFFrJ3NA8
+                  client_uuid: 6f1c1c1e-0b7e-4f7a-9d6e-2c1a3b4c5d6e
+                  device_id: A54-AWA
+                  latitude: 5.3197012
+                  longitude: -4.0167293
+                  accuracy: 12
+              sortie:
+                summary: Imposer le sens (poste de sortie)
+                value:
+                  code: o5kZFFrJ3NA8
+                  direction: out
+                  client_uuid: 9a4e7d0c-1b2f-4c3d-8e5f-6a7b8c9d0e1f
+              forcer:
+                summary: Forcer un pass non valide (chef)
+                value:
+                  code: 4I3a7T4VRBqQ
+                  force: true
+                  reason: Invité de dernière minute
+                  client_uuid: 3c2b1a09-8f7e-4d6c-9b5a-4e3d2c1b0a99
+              refuser:
+                summary: Tracer un refus (optionnel)
+                value:
+                  code: o5kZFFrJ3NA8
+                  result: denied
+                  reason: Plaque différente
+                  client_uuid: 0b9d6a52-8c1d-4a55-b0b5-7f6f2a7b1c11
+      responses:
+        '201':
+          description: Passage enregistré.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResponse'
+              example:
+                scan: *ScanEntry
+                pass: *PassInside
+        '200':
+          description: '`client_uuid` déjà reçu : le passage existant est renvoyé, rien n''est modifié.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResponse'
+              example:
+                scan: *ScanEntry
+                pass: *PassInside
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDisabled'
+        '422':
+          description: |
+            **Passage refusé** (pass non valide : présence de `reason`) **ou** données invalides
+            (présence de `errors`).
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/ScanRefused'
+                  - $ref: '#/components/schemas/ValidationError'
+              examples:
+                agent:
+                  summary: Agent — pass sans véhicule
+                  value:
+                    message: Aucun véhicule n'est enregistré sur ce pass.
+                    reason: not_registered
+                    can_force: false
+                chef_peut_forcer:
+                  summary: Chef sans `force` — peut renvoyer avec force=true
+                  value:
+                    message: Ce pass a été révoqué.
+                    reason: revoked
+                    can_force: true
+                non_affecte:
+                  summary: Pass d'un autre événement
+                  value:
+                    message: Vous n'êtes pas affecté à l'événement de ce pass.
+                    reason: not_assigned
+                    can_force: false
+                validation:
+                  summary: Erreur de validation
+                  value:
+                    message: Le champ code est obligatoire.
+                    errors:
+                      code: [Le champ code est obligatoire.]
+
+  /scans/history:
+    get:
+      tags: [Historique]
+      operationId: myHistory
+      summary: Mon historique de passages
+      description: |
+        Passages effectués par **l'utilisateur connecté** (tous événements confondus), du plus récent
+        au plus ancien, **30 par page**. Chargez la page suivante avec `links.next` (`null` = fin).
+
+        Chaque ligne indique le pass (numéro, immatriculation, type), l'événement, le sens, le résultat
+        et l'heure. `pass` et `event` sont `null` pour un QR code inconnu ou hors de vos événements.
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Page de l'historique.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedScans'
+              example:
+                data:
+                  - *ScanEntry
+                  - id: 11
+                    client_uuid: 1d2c3b4a-5e6f-4a7b-8c9d-0e1f2a3b4c5d
+                    direction: in
+                    result: denied
+                    reason: unknown_pass
+                    forced: false
+                    offline: false
+                    scanned_at: '2026-10-14T18:01:40.000000Z'
+                    location: null
+                    event: null
+                    pass: null
+                links:
+                  first: https://pass.exemple.com/api/v1/scans/history?page=1
+                  last: https://pass.exemple.com/api/v1/scans/history?page=1
+                  prev: null
+                  next: null
+                meta:
+                  current_page: 1
+                  from: 1
+                  last_page: 1
+                  path: https://pass.exemple.com/api/v1/scans/history
+                  per_page: 30
+                  to: 2
+                  total: 2
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDisabled'
+
+  /events:
+    get:
+      tags: [Supervision]
+      operationId: listEvents
+      summary: Mes événements (chef)
+      description: |
+        Événements non clôturés auxquels l'utilisateur est affecté (tous pour un admin), avec son rôle.
+        **Utile uniquement au chef** : choisir l'événement à superviser. Afficher l'onglet Supervision
+        seulement si au moins un événement a `can_supervise = true`.
+      responses:
+        '200':
+          description: Liste des événements.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+              example:
+                data:
+                  - *EventChief
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDisabled'
+
+  /events/{event}/stats:
+    parameters:
+      - $ref: '#/components/parameters/EventId'
+    get:
+      tags: [Supervision]
+      operationId: eventStats
+      summary: Tableau de bord de l'événement
+      description: |
+        Compteurs en temps réel. **Chef de l'événement (ou admin) uniquement.**
+
+        - `passes.inside` : véhicules actuellement dans le parking.
+        - `scans.entries` / `scans.exits` : passages **autorisés** (un véhicule peut entrer plusieurs fois).
+        - `scans.denied` : refus tracés.
+      responses:
+        '200':
+          description: Statistiques.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stats'
+              example:
+                passes: { total: 60, pending: 52, registered: 8, revoked: 0, inside: 3 }
+                scans: { entries: 5, exits: 2, denied: 1 }
+                by_type:
+                  - { id: 1, name: VIP, color: '#b45309', total: 20, registered: 8, inside: 3 }
+                  - { id: 2, name: Staff, color: '#059669', total: 30, registered: 0, inside: 0 }
+                  - { id: 3, name: Presse, color: '#7c3aed', total: 10, registered: 0, inside: 0 }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/NotEventChief'
+        '404':
+          $ref: '#/components/responses/EventNotFound'
+
+  /events/{event}/scans:
+    parameters:
+      - $ref: '#/components/parameters/EventId'
+    get:
+      tags: [Supervision]
+      operationId: eventScans
+      summary: Historique de tous les passages de l'événement
+      description: |
+        Passages de **tous les agents** de l'événement, du plus récent au plus ancien, **50 par page**.
+        Chaque ligne indique l'agent (`agent`). **Chef de l'événement (ou admin) uniquement.**
+      parameters:
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Page de passages.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedScans'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/NotEventChief'
+        '404':
+          $ref: '#/components/responses/EventNotFound'
+
+  /sync:
+    get:
+      tags: [Hors ligne]
+      operationId: sync
+      summary: Télécharger les pass de mes événements
+      description: |
+        Renvoie les événements non clôturés de l'utilisateur et **tous leurs pass** (tous statuts), pour
+        vérifier sans réseau.
+
+        - **Première synchro** : sans `since` → tout (`full = true`) ; remplacez le cache local.
+        - **Synchros suivantes** : `since` = `server_time` précédent → pass créés ou modifiés depuis,
+          plus **tous** les pass des événements auxquels l'agent a été affecté entre-temps
+          (`full = false`). **Fusionnez par `id`** (le filtre est inclusif). Remplacez la liste des
+          événements par `events` : un événement absent n'est plus à contrôler (retirez ses pass).
+        - **Pass supprimés** par l'administrateur : leurs `id` sont dans `deleted_pass_ids` ;
+          retirez-les du cache local (leur QR code n'est plus reconnu).
+      parameters:
+        - name: since
+          in: query
+          required: false
+          description: '`server_time` de la synchronisation précédente (ISO 8601).'
+          schema:
+            type: string
+            format: date-time
+          example: '2026-10-14T18:05:00+00:00'
+      responses:
+        '200':
+          description: Pass à jour.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResponse'
+              example:
+                server_time: '2026-10-14T18:05:00+00:00'
+                full: true
+                events:
+                  - *EventAgent
+                passes:
+                  - *PassRegistered
+                  - *PassPending
+                deleted_pass_ids: []
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDisabled'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+
+  /scans/batch:
+    post:
+      tags: [Hors ligne]
+      operationId: batchScans
+      summary: Envoyer les passages faits hors ligne
+      description: |
+        Jusqu'à **500 passages** enregistrés sans réseau.
+
+        - La décision prise hors ligne est **conservée** (`offline = true`) ; le serveur contrôle seulement
+          que le pass appartient à un événement de l'utilisateur. Sinon le passage est historisé sans
+          pass (`reason = unknown_pass` ou `not_assigned`).
+        - Appliqués **par ordre chronologique** (`scanned_at`) : la position finale du véhicule est celle
+          du dernier passage autorisé.
+        - **Idempotent** : un `client_uuid` déjà reçu est ignoré (`duplicate`).
+        - Si la validation échoue (`422`), **aucun** passage du lot n'est enregistré.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchScanRequest'
+            example:
+              scans:
+                - client_uuid: 6f1c1c1e-0b7e-4f7a-9d6e-2c1a3b4c5d6e
+                  code: https://pass.exemple.com/p/o5kZFFrJ3NA8
+                  result: granted
+                  direction: in
+                  scanned_at: '2026-10-14T18:03:12+00:00'
+                  device_id: A54-AWA
+                  latitude: 5.3197012
+                  longitude: -4.0167293
+                  accuracy: 12
+                - client_uuid: 9a4e7d0c-1b2f-4c3d-8e5f-6a7b8c9d0e1f
+                  code: o5kZFFrJ3NA8
+                  result: granted
+                  direction: out
+                  scanned_at: '2026-10-14T21:47:05+00:00'
+                  device_id: A54-AWA
+      responses:
+        '200':
+          description: Lot traité.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchScanResponse'
+              example:
+                created: 1
+                duplicates: 1
+                results:
+                  - client_uuid: 6f1c1c1e-0b7e-4f7a-9d6e-2c1a3b4c5d6e
+                    status: duplicate
+                  - client_uuid: 9a4e7d0c-1b2f-4c3d-8e5f-6a7b8c9d0e1f
+                    status: created
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/AccountDisabled'
+        '422':
+          description: Lot invalide (rien n'est enregistré). Les champs en erreur sont indexés (`scans.1.scanned_at`).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+              example:
+                message: Le champ date du passage est obligatoire.
+                errors:
+                  scans.1.scanned_at: [Le champ date du passage est obligatoire.]
+
+components:
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: 'Token obtenu via `POST /auth/login`, au format `<id>|<secret>`. En-tête : `Authorization: Bearer 3|kV8Xy...`'
+
+  parameters:
+    EventId:
+      name: event
+      in: path
+      required: true
+      description: Identifiant de l'événement (`id` renvoyé par `GET /events`).
+      schema:
+        type: integer
+        minimum: 1
+      example: 1
+    Page:
+      name: page
+      in: query
+      required: false
+      description: Numéro de page (commence à 1).
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+  responses:
+    Unauthenticated:
+      description: Token absent, invalide ou révoqué. Retour à l'écran de connexion.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: Unauthenticated.
+    AccountDisabled:
+      description: Compte désactivé par l'administrateur. Le token est révoqué ; retour à l'écran de connexion.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: Compte désactivé.
+    NotEventChief:
+      description: Réservé au chef agent parking de l'événement et aux administrateurs (ou compte désactivé).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          examples:
+            non_chef:
+              summary: Pas chef de cet événement
+              value:
+                message: This action is unauthorized.
+            desactive:
+              summary: Compte désactivé
+              value:
+                message: Compte désactivé.
+    EventNotFound:
+      description: Événement inexistant.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: No query results for model [App\Models\Event] 99
+    ValidationFailed:
+      description: Données invalides.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ValidationError'
+          example:
+            message: Le champ code est obligatoire.
+            errors:
+              code: [Le champ code est obligatoire.]
+    TooManyRequests:
+      description: Trop de tentatives. Réessayez après le délai de l'en-tête `Retry-After` (secondes).
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Message'
+          example:
+            message: Too Many Attempts.
+
+  schemas:
+
+    # ---------- Énumérations ----------
+
+    UserRole:
+      type: string
+      enum: [admin, agent]
+      description: Rôle global du compte. Le rôle de chef se définit par événement (`Event.my_role`).
+
+    EventRole:
+      type: string
+      enum: [admin, chief, agent]
+      description: |
+        Rôle de l'utilisateur sur l'événement : `admin`, `chief` (chef agent parking) ou `agent`.
+
+    EventStatus:
+      type: string
+      enum: [draft, active, closed]
+      description: '`draft` brouillon, `active` ouvert, `closed` clôturé (scans refusés).'
+
+    PassStatus:
+      type: string
+      enum: [pending, registered, revoked]
+      description: |
+        - `pending` : aucun véhicule enregistré par l'usager
+        - `registered` : véhicule enregistré, pass utilisable
+        - `revoked` : désactivé par l'admin ou le chef
+
+    Direction:
+      type: string
+      enum: [in, out]
+      description: |
+        Sens d'un passage (`in` = entrée, `out` = sortie), ou position d'un véhicule
+        (`in` = dans le parking, `out` = dehors).
+
+    ScanResult:
+      type: string
+      enum: [granted, denied]
+      description: '`granted` = passage validé, `denied` = refus tracé.'
+
+    RefusalReason:
+      type: string
+      enum: [unknown_pass, not_assigned, event_closed, not_registered, revoked]
+      description: |
+        - `unknown_pass` : QR code inconnu
+        - `not_assigned` : pass d'un événement auquel l'utilisateur n'est pas affecté
+        - `event_closed` : événement clôturé
+        - `not_registered` : aucun véhicule enregistré sur le pass
+        - `revoked` : pass révoqué
+
+    # ---------- Ressources ----------
+
+    User:
+      type: object
+      required: [id, name, email, phone, role]
+      properties:
+        id:
+          type: integer
+          example: 4
+        name:
+          type: string
+          example: Awa Agent
+        email:
+          type: string
+          format: email
+          nullable: true
+          description: Facultatif pour un agent ou un chef.
+          example: null
+        phone:
+          type: string
+          nullable: true
+          description: Identifiant de connexion, sans espaces ni séparateurs. Toujours renseigné pour un agent ou un chef.
+          example: '+2250702020200'
+        role:
+          $ref: '#/components/schemas/UserRole'
+
+    Location:
+      type: object
+      description: Position GPS de l'agent au moment du scan.
+      required: [latitude, longitude, accuracy]
+      properties:
+        latitude:
+          type: number
+          format: double
+          example: 5.3197012
+        longitude:
+          type: number
+          format: double
+          example: -4.0167293
+        accuracy:
+          type: integer
+          nullable: true
+          description: Précision en mètres.
+          example: 12
+
+    EventRef:
+      type: object
+      description: Référence courte à un événement.
+      required: [id, name]
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Festival de démonstration
+
+    PassType:
+      type: object
+      description: Catégorie de pass (VIP, Staff, Presse…).
+      required: [id, name, code, color]
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: VIP
+        code:
+          type: string
+          example: VIP
+        color:
+          type: string
+          pattern: '^#[0-9a-fA-F]{6}$'
+          description: Couleur hexadécimale du type, à utiliser à l'affichage.
+          example: '#b45309'
+
+    Event:
+      type: object
+      required: [id, name, code, location, starts_at, ends_at, status, my_role, can_supervise, pass_types]
+      properties:
+        id:
+          type: integer
+          example: 1
+        name:
+          type: string
+          example: Festival de démonstration
+        code:
+          type: string
+          example: DEMO26
+        location:
+          type: string
+          nullable: true
+          example: Palais de la Culture
+        starts_at:
+          type: string
+          format: date-time
+        ends_at:
+          type: string
+          format: date-time
+        status:
+          $ref: '#/components/schemas/EventStatus'
+        my_role:
+          $ref: '#/components/schemas/EventRole'
+        can_supervise:
+          type: boolean
+          description: '`true` pour le chef de l''événement et les admins.'
+        pass_types:
+          type: array
+          items:
+            $ref: '#/components/schemas/PassType'
+
+    Vehicle:
+      type: object
+      description: Véhicule enregistré par l'usager.
+      required: [plate, brand, color, phone]
+      properties:
+        plate:
+          type: string
+          description: Immatriculation en majuscules.
+          example: 1000 AB 01
+        brand:
+          type: string
+          example: Mercedes-Benz
+        color:
+          type: string
+          example: Bordeaux
+        phone:
+          type: string
+          description: Téléphone de l'usager (pour le joindre si besoin).
+          example: '+2250718898224'
+
+    Pass:
+      type: object
+      required: [id, event_id, number, token, status, status_label, presence, next_direction, type, vehicle, registered_at, last_scanned_at, updated_at]
+      properties:
+        id:
+          type: integer
+          example: 1
+        event_id:
+          type: integer
+          example: 1
+        number:
+          type: string
+          description: Numéro imprimé sur le pass.
+          example: DEMO26-VIP-0001
+        token:
+          type: string
+          description: Jeton du QR code (`/p/{token}`) — clé de recherche en mode hors ligne.
+          example: o5kZFFrJ3NA8
+        status:
+          $ref: '#/components/schemas/PassStatus'
+        status_label:
+          type: string
+          example: Enregistré
+        presence:
+          allOf:
+            - $ref: '#/components/schemas/Direction'
+          description: Position actuelle du véhicule (`in` = dans le parking).
+        next_direction:
+          allOf:
+            - $ref: '#/components/schemas/Direction'
+          description: Sens du prochain passage (inverse de `presence`).
+        type:
+          $ref: '#/components/schemas/PassType'
+        vehicle:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/Vehicle'
+          nullable: true
+          description: '`null` tant que l''usager n''a pas enregistré son véhicule.'
+        registered_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_scanned_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Dernier passage autorisé.
+        updated_at:
+          type: string
+          format: date-time
+
+    ScanPassSummary:
+      type: object
+      required: [id, number, plate, type]
+      properties:
+        id:
+          type: integer
+          example: 1
+        number:
+          type: string
+          example: DEMO26-VIP-0001
+        plate:
+          type: string
+          nullable: true
+          example: 1000 AB 01
+        type:
+          type: object
+          required: [name, color]
+          properties:
+            name:
+              type: string
+              example: VIP
+            color:
+              type: string
+              example: '#b45309'
+
+    Scan:
+      type: object
+      description: Un passage.
+      required: [id, client_uuid, direction, result, reason, forced, offline, scanned_at, location, event, pass]
+      properties:
+        id:
+          type: integer
+          example: 12
+        client_uuid:
+          type: string
+          format: uuid
+          nullable: true
+        direction:
+          $ref: '#/components/schemas/Direction'
+        result:
+          $ref: '#/components/schemas/ScanResult'
+        reason:
+          type: string
+          nullable: true
+          description: Motif saisi, ou code `RefusalReason` pour un QR code inconnu / hors événement / forcé.
+        forced:
+          type: boolean
+          description: Passage forcé par un chef malgré un pass non valide.
+        offline:
+          type: boolean
+          description: Passage effectué hors ligne (`POST /scans/batch`).
+        scanned_at:
+          type: string
+          format: date-time
+        location:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/Location'
+          nullable: true
+          description: Position de l'agent au moment du scan ; `null` si l'app ne l'a pas envoyée.
+        event:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/EventRef'
+          nullable: true
+          description: '`null` pour un QR code inconnu ou hors des événements de l''utilisateur.'
+        agent:
+          type: object
+          required: [id, name]
+          nullable: true
+          description: Auteur du passage — présent uniquement dans `GET /events/{event}/scans`.
+          properties:
+            id:
+              type: integer
+            name:
+              type: string
+        pass:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/ScanPassSummary'
+          nullable: true
+          description: '`null` pour un QR code inconnu ou hors des événements de l''utilisateur.'
+
+    # ---------- Requêtes / réponses ----------
+
+    LoginRequest:
+      type: object
+      required: [phone, password, device_name]
+      properties:
+        phone:
+          type: string
+          maxLength: 30
+          description: Numéro de téléphone du compte (espaces, points et tirets ignorés).
+          example: '+225 07 02 02 02 00'
+        password:
+          type: string
+          format: password
+        device_name:
+          type: string
+          maxLength: 100
+          description: Nom de l'appareil (ex. modèle + prénom de l'agent).
+
+    LoginResponse:
+      type: object
+      required: [token, user]
+      properties:
+        token:
+          type: string
+          description: 'À envoyer dans l''en-tête `Authorization: Bearer <token>`.'
+        user:
+          $ref: '#/components/schemas/User'
+
+    VerifyRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          maxLength: 500
+          description: Contenu brut du QR code (URL complète ou jeton).
+
+    VerifyResponse:
+      type: object
+      required: [valid, reason, message, can_force, event, pass]
+      properties:
+        valid:
+          type: boolean
+          description: '`true` → afficher l''écran vert et le bouton « Valider ».'
+        reason:
+          type: string
+          enum: [unknown_pass, not_assigned, event_closed, not_registered, revoked, null]
+          nullable: true
+          description: Motif (`RefusalReason`) ; `null` si `valid = true`.
+        message:
+          type: string
+          description: Message en français à afficher.
+        can_force:
+          type: boolean
+          description: '`true` si l''utilisateur (chef de l''événement / admin) peut forcer ce pass non valide.'
+        event:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/EventRef'
+          nullable: true
+          description: Événement du pass ; `null` pour `unknown_pass` et `not_assigned`.
+        pass:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/Pass'
+          nullable: true
+          description: '`null` pour `unknown_pass` et `not_assigned`.'
+
+    ScanRequest:
+      type: object
+      required: [code]
+      properties:
+        code:
+          type: string
+          maxLength: 500
+          description: Contenu brut du QR code (URL complète ou jeton).
+        direction:
+          type: string
+          enum: [in, out, null]
+          nullable: true
+          description: Sens imposé. Absent → déduit automatiquement (`next_direction`).
+        client_uuid:
+          type: string
+          format: uuid
+          nullable: true
+          description: UUID généré par l'app — rend l'appel idempotent. **Fortement recommandé.**
+        force:
+          type: boolean
+          default: false
+          description: Forcer un pass non valide. Accepté seulement si `can_force = true`.
+        reason:
+          type: string
+          maxLength: 255
+          nullable: true
+          description: Motif libre (passage forcé ou refus).
+        result:
+          type: string
+          enum: [granted, denied, null]
+          nullable: true
+          default: granted
+          description: Optionnel. `granted` (défaut) valide le passage ; `denied` trace un refus.
+        device_id:
+          type: string
+          maxLength: 100
+          nullable: true
+          description: Identifiant du terminal (traçabilité).
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          nullable: true
+          description: Latitude GPS de l'agent (WGS84). Obligatoire si `longitude` est envoyée.
+          example: 5.3197012
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          nullable: true
+          description: Longitude GPS de l'agent (WGS84). Obligatoire si `latitude` est envoyée.
+          example: -4.0167293
+        accuracy:
+          type: number
+          minimum: 0
+          maximum: 100000
+          nullable: true
+          description: Précision de la position, en mètres.
+          example: 12
+
+    ScanResponse:
+      type: object
+      required: [scan, pass]
+      properties:
+        scan:
+          $ref: '#/components/schemas/Scan'
+        pass:
+          type: object
+          allOf:
+            - $ref: '#/components/schemas/Pass'
+          nullable: true
+          description: Pass avec sa nouvelle position (`presence`). `null` si aucun pass rattaché.
+
+    ScanRefused:
+      type: object
+      description: Passage refusé par le serveur (pass non valide).
+      required: [message, reason, can_force]
+      properties:
+        message:
+          type: string
+          description: Message en français à afficher.
+        reason:
+          $ref: '#/components/schemas/RefusalReason'
+        can_force:
+          type: boolean
+          description: '`true` → le chef peut renvoyer la requête avec `force: true`.'
+
+    BatchScanItem:
+      type: object
+      required: [client_uuid, code, result, direction, scanned_at]
+      properties:
+        client_uuid:
+          type: string
+          format: uuid
+          description: Unique (clé d'idempotence).
+        code:
+          type: string
+          maxLength: 500
+        result:
+          $ref: '#/components/schemas/ScanResult'
+        direction:
+          $ref: '#/components/schemas/Direction'
+        scanned_at:
+          type: string
+          format: date-time
+          description: Heure réelle du scan (avec fuseau).
+        reason:
+          type: string
+          maxLength: 255
+          nullable: true
+        forced:
+          type: boolean
+          default: false
+        device_id:
+          type: string
+          maxLength: 100
+          nullable: true
+        latitude:
+          type: number
+          format: double
+          minimum: -90
+          maximum: 90
+          nullable: true
+          description: Latitude GPS au moment du scan hors ligne. Obligatoire si `longitude` est envoyée.
+          example: 5.3197012
+        longitude:
+          type: number
+          format: double
+          minimum: -180
+          maximum: 180
+          nullable: true
+          description: Longitude GPS au moment du scan hors ligne. Obligatoire si `latitude` est envoyée.
+          example: -4.0167293
+        accuracy:
+          type: number
+          minimum: 0
+          maximum: 100000
+          nullable: true
+          description: Précision de la position, en mètres.
+          example: 12
+
+    BatchScanRequest:
+      type: object
+      required: [scans]
+      properties:
+        scans:
+          type: array
+          minItems: 1
+          maxItems: 500
+          items:
+            $ref: '#/components/schemas/BatchScanItem'
+
+    BatchScanResponse:
+      type: object
+      required: [created, duplicates, results]
+      properties:
+        created:
+          type: integer
+        duplicates:
+          type: integer
+        results:
+          type: array
+          description: Dans l'ordre chronologique de `scanned_at`.
+          items:
+            type: object
+            required: [client_uuid, status]
+            properties:
+              client_uuid:
+                type: string
+                format: uuid
+              status:
+                type: string
+                enum: [created, duplicate]
+                description: Dans les deux cas, le passage peut être retiré de la file locale.
+
+    SyncResponse:
+      type: object
+      required: [server_time, full, events, passes, deleted_pass_ids]
+      properties:
+        server_time:
+          type: string
+          format: date-time
+          description: À renvoyer dans `since` à la prochaine synchro.
+        full:
+          type: boolean
+          description: '`true` → liste complète : remplacez le cache local.'
+        events:
+          type: array
+          description: Événements non clôturés de l'utilisateur (liste toujours complète).
+          items:
+            $ref: '#/components/schemas/Event'
+        passes:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pass'
+        deleted_pass_ids:
+          type: array
+          description: Pass supprimés depuis `since`, à retirer du cache local. Toujours vide si `full = true`.
+          items:
+            type: integer
+          example: [42, 43]
+
+    Stats:
+      type: object
+      required: [passes, scans, by_type]
+      properties:
+        passes:
+          type: object
+          required: [total, pending, registered, revoked, inside]
+          properties:
+            total:
+              type: integer
+            pending:
+              type: integer
+            registered:
+              type: integer
+            revoked:
+              type: integer
+            inside:
+              type: integer
+              description: Véhicules actuellement dans le parking.
+        scans:
+          type: object
+          required: [entries, exits, denied]
+          properties:
+            entries:
+              type: integer
+            exits:
+              type: integer
+            denied:
+              type: integer
+        by_type:
+          type: array
+          items:
+            type: object
+            required: [id, name, color, total, registered, inside]
+            properties:
+              id:
+                type: integer
+              name:
+                type: string
+              color:
+                type: string
+              total:
+                type: integer
+              registered:
+                type: integer
+              inside:
+                type: integer
+
+    PaginatedScans:
+      type: object
+      required: [data, links, meta]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Scan'
+        links:
+          type: object
+          properties:
+            first:
+              type: string
+              nullable: true
+            last:
+              type: string
+              nullable: true
+            prev:
+              type: string
+              nullable: true
+            next:
+              type: string
+              nullable: true
+              description: '`null` sur la dernière page.'
+        meta:
+          type: object
+          properties:
+            current_page:
+              type: integer
+            from:
+              type: integer
+              nullable: true
+            last_page:
+              type: integer
+            path:
+              type: string
+            per_page:
+              type: integer
+            to:
+              type: integer
+              nullable: true
+            total:
+              type: integer
+            links:
+              type: array
+              items:
+                type: object
+                properties:
+                  url:
+                    type: string
+                    nullable: true
+                  label:
+                    type: string
+                  active:
+                    type: boolean
+
+    Message:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+
+    ValidationError:
+      type: object
+      required: [message, errors]
+      properties:
+        message:
+          type: string
+          description: Premier message d'erreur (suivi de « (et N erreurs de plus) » s'il y en a plusieurs).
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items:
+              type: string
