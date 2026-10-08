@@ -23,6 +23,22 @@ class PhoneLoginTest extends TestCase
         }
     }
 
+    public function test_device_name_is_optional(): void
+    {
+        $agent = User::factory()->create();
+
+        $this->withHeader('User-Agent', 'okhttp/4.12 (Android 14; SM-A546B)')
+            ->postJson('/api/v1/auth/login', ['phone' => $agent->phone, 'password' => 'password'])
+            ->assertOk()
+            ->assertJsonStructure(['token', 'user']);
+        $this->assertSame('okhttp/4.12 (Android 14; SM-A546B)', $agent->tokens()->latest('id')->value('name'));
+
+        $this->withHeader('User-Agent', '')
+            ->postJson('/api/v1/auth/login', ['phone' => $agent->phone, 'password' => 'password', 'device_name' => ''])
+            ->assertOk();
+        $this->assertSame('Application mobile', $agent->tokens()->latest('id')->value('name'));
+    }
+
     public function test_app_login_rejects_wrong_credentials_and_email(): void
     {
         $agent = User::factory()->create();

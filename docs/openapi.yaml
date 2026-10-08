@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Pass Parking — API application agents
-  version: 1.5.0
+  version: 1.5.1
   description: |
     API REST de l'application mobile des **agents parking** et des **chefs agent parking**.
 
@@ -271,7 +271,8 @@ paths:
       summary: Se connecter
       description: |
         Échange le **numéro de téléphone** et le mot de passe contre un **token d'accès**, à stocker de façon sécurisée
-        (Keychain / Keystore). Chaque appareil reçoit son propre token (`device_name`).
+        (Keychain / Keystore). Chaque appareil reçoit son propre token. `device_name` est **facultatif** :
+        il sert seulement à reconnaître l'appareil dans le journal.
 
         Limité à **10 tentatives par minute** (au-delà : `429`).
       security: []
@@ -322,9 +323,9 @@ paths:
                 validation:
                   summary: Champ manquant
                   value:
-                    message: Le champ nom de l'appareil est obligatoire.
+                    message: Le champ mot de passe est obligatoire.
                     errors:
-                      device_name: [Le champ nom de l'appareil est obligatoire.]
+                      password: [Le champ mot de passe est obligatoire.]
         '429':
           $ref: '#/components/responses/TooManyRequests'
 
@@ -1310,7 +1311,7 @@ components:
 
     LoginRequest:
       type: object
-      required: [phone, password, device_name]
+      required: [phone, password]
       properties:
         phone:
           type: string
@@ -1323,7 +1324,8 @@ components:
         device_name:
           type: string
           maxLength: 100
-          description: Nom de l'appareil (ex. modèle + prénom de l'agent).
+          nullable: true
+          description: Facultatif. Nom de l'appareil affiché dans le journal (ex. modèle + prénom de l'agent). À défaut, l'en-tête User-Agent est utilisé, ou « Application mobile ».
 
     LoginResponse:
       type: object

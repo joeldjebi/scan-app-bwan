@@ -8,6 +8,7 @@ use App\Services\AuditLogger;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
@@ -17,8 +18,11 @@ class AuthController extends Controller
         $data = $request->validate([
             'phone' => ['required', 'string', 'max:30'],
             'password' => ['required', 'string'],
-            'device_name' => ['required', 'string', 'max:100'],
+            'device_name' => ['nullable', 'string', 'max:100'],
         ]);
+
+        // Facultatif : à défaut, le jeton porte le nom de l'appareil fourni par le navigateur.
+        $data['device_name'] = trim((string) ($data['device_name'] ?? '')) ?: Str::limit((string) $request->userAgent(), 97) ?: 'Application mobile';
 
         $user = User::findByPhone($data['phone']);
 

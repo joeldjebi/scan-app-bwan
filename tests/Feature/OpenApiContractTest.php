@@ -73,6 +73,8 @@ class OpenApiContractTest extends TestCase
     {
         $body = ['phone' => $this->agent->phone, 'password' => 'password', 'device_name' => 'Pixel'];
         $this->contract('post', '/auth/login', $this->postJson('/api/v1/auth/login', $body), 200, $body);
+        $body = ['phone' => $this->agent->phone, 'password' => 'password'];
+        $this->contract('post', '/auth/login', $this->postJson('/api/v1/auth/login', $body), 200, $body);
         $body = ['phone' => $this->agent->phone, 'password' => 'wrong', 'device_name' => 'Pixel'];
         $this->contract('post', '/auth/login', $this->postJson('/api/v1/auth/login', $body), 422, $body);
         $this->contract('get', '/auth/me', $this->getJson('/api/v1/auth/me'), 401);

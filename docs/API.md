@@ -20,7 +20,7 @@
 
 | Méthode | Route | Qui | Rôle |
 |---|---|---|---|
-| POST | `/auth/login` | tous | `{phone, password, device_name}` → `{token, user}` (connexion par **numéro de téléphone**) |
+| POST | `/auth/login` | tous | `{phone, password}` (+ `device_name` facultatif) → `{token, user}` (connexion par **numéro de téléphone**) |
 | GET | `/auth/me` | tous | Vérifie que le token est valide |
 | POST | `/auth/logout` | tous | Révoque le token |
 | POST | `/verify` | tous | `{code}` **ou** `{plate}` → `{valid, reason, message, method, can_force, event, pass, matches}`. N'enregistre rien. |
