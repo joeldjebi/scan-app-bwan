@@ -3,12 +3,13 @@
 namespace App\Models;
 
 use App\Enums\Direction;
+use App\Enums\ScanMethod;
 use App\Enums\ScanResult;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[Fillable(['event_id', 'pass_id', 'user_id', 'direction', 'result', 'reason', 'forced', 'offline', 'device_id', 'latitude', 'longitude', 'location_accuracy', 'client_uuid', 'scanned_at'])]
+#[Fillable(['event_id', 'pass_id', 'user_id', 'direction', 'result', 'method', 'reason', 'forced', 'offline', 'device_id', 'latitude', 'longitude', 'location_accuracy', 'client_uuid', 'scanned_at'])]
 class Scan extends Model
 {
     protected function casts(): array
@@ -16,6 +17,7 @@ class Scan extends Model
         return [
             'direction' => Direction::class,
             'result' => ScanResult::class,
+            'method' => ScanMethod::class,
             'forced' => 'boolean',
             'offline' => 'boolean',
             'scanned_at' => 'datetime',

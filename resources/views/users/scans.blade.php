@@ -38,21 +38,28 @@
                 <option value="{{ $result->value }}" @selected(request('result') === $result->value)>{{ $result->label() }}</option>
             @endforeach
         </select>
+        <select name="method" class="{{ $input }}">
+            <option value="">QR code et saisie</option>
+            @foreach (\App\Enums\ScanMethod::cases() as $method)
+                <option value="{{ $method->value }}" @selected(request('method') === $method->value)>{{ $method->label() }}</option>
+            @endforeach
+        </select>
         <label class="text-xs text-slate-500">Du <input type="date" name="from" value="{{ request('from') }}" class="{{ $input }} ml-1"></label>
         <label class="text-xs text-slate-500">au <input type="date" name="to" value="{{ request('to') }}" class="{{ $input }} ml-1"></label>
         <button class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Filtrer</button>
-        @if (array_filter(request()->only('event', 'direction', 'result', 'from', 'to')))
+        @if (array_filter(request()->only('event', 'direction', 'result', 'method', 'from', 'to')))
             <a href="{{ route('users.scans', $user) }}" class="px-2 py-2 text-sm text-slate-500 hover:underline">Réinitialiser</a>
         @endif
     </form>
 
-    <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+    <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
         @foreach ([
             ['Scans', $summary['total']],
             ['Entrées validées', $summary['entries']],
             ['Sorties validées', $summary['exits']],
             ['Refus', $summary['denied']],
             ['Passages forcés', $summary['forced']],
+            ['Saisies manuelles', $summary['manual']],
             ['Géolocalisés', $summary['located']],
         ] as [$label, $value])
             <div class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">

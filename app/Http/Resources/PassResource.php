@@ -28,6 +28,7 @@ class PassResource extends JsonResource
             ],
             'vehicle' => $this->vehicle ? [
                 'plate' => $this->vehicle->plate,
+                'plate_key' => $this->vehicle->plate_key,
                 'brand' => $this->vehicle->brand,
                 'color' => $this->vehicle->color,
                 'phone' => $this->vehicle->phone,

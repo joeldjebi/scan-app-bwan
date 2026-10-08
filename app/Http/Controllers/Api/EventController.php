@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Enums\Direction;
 use App\Enums\EventStatus;
 use App\Enums\PassStatus;
+use App\Enums\ScanMethod;
 use App\Enums\ScanResult;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\EventResource;
@@ -64,6 +65,8 @@ class EventController extends Controller
                 'entries' => $count($scans, ['direction' => Direction::In, 'result' => ScanResult::Granted]),
                 'exits' => $count($scans, ['direction' => Direction::Out, 'result' => ScanResult::Granted]),
                 'denied' => $count($scans, ['result' => ScanResult::Denied]),
+                // Passages validés par saisie de l'immatriculation (sans QR code).
+                'manual' => $event->scans()->where('method', ScanMethod::Plate)->count(),
             ],
             'by_type' => $event->passTypes->map(fn ($type) => [
                 'id' => $type->id,

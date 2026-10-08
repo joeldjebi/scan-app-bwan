@@ -4,11 +4,14 @@ namespace App\Services;
 
 use App\Enums\Direction;
 use App\Enums\PassStatus;
+use App\Enums\ScanMethod;
 use App\Enums\ScanResult;
 use App\Models\Pass;
 use App\Models\Scan;
 use App\Models\User;
+use App\Models\Vehicle;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 class PassScanner
@@ -29,6 +32,49 @@ class PassScanner
         }
 
         return Pass::with(['event', 'type', 'vehicle'])->where('token', $code)->first();
+    }
+
+    /**
+     * Pass dont le véhicule porte cette immatriculation, saisie dans n'importe quel format
+     * (« 1234 ab-01 » = « 1234AB01 »), limités aux événements de l'utilisateur.
+     *
+     * @return Collection<int, Pass>
+     */
+    public function findByPlate(User $user, string $plate): Collection
+    {
+        $key = Vehicle::plateKey($plate);
+
+        if (strlen($key) < 2) {
+            return collect();
+        }
+
+        return Pass::with(['event', 'type', 'vehicle'])
+            ->whereHas('vehicle', fn ($query) => $query->where('plate_key', $key))
+            ->get()
+            ->filter(fn (Pass $pass) => $user->canOperate($pass->event))
+            ->values();
+    }
+
+    /**
+     * Identifie le pass à partir du QR code ou, à défaut, de l'immatriculation saisie.
+     *
+     * @return array{outcome: ScanOutcome, method: ScanMethod, matches: Collection<int, Pass>}
+     */
+    public function resolve(User $user, ?string $code, ?string $plate): array
+    {
+        if ($code !== null && $code !== '') {
+            return ['outcome' => $this->check($user, $this->find($code)), 'method' => ScanMethod::Qr, 'matches' => collect()];
+        }
+
+        $matches = $this->findByPlate($user, (string) $plate);
+
+        $outcome = match ($matches->count()) {
+            0 => new ScanOutcome(null, ScanOutcome::UNKNOWN_PLATE),
+            1 => $this->check($user, $matches->first()),
+            default => new ScanOutcome(null, ScanOutcome::MULTIPLE_MATCHES),
+        };
+
+        return ['outcome' => $outcome, 'method' => ScanMethod::Plate, 'matches' => $matches->count() > 1 ? $matches : collect()];
     }
 
     /**
@@ -61,7 +107,7 @@ class PassScanner
      * Enregistre un passage et met à jour la position du véhicule s'il est autorisé.
      * $pass est null pour un QR code inconnu ou hors des événements de l'agent.
      *
-     * @param  array{direction?: ?Direction, reason?: ?string, forced?: bool, offline?: bool, device_id?: ?string, latitude?: ?float, longitude?: ?float, location_accuracy?: ?int, client_uuid?: ?string, scanned_at?: ?Carbon}  $attributes
+     * @param  array{direction?: ?Direction, method?: ScanMethod, reason?: ?string, forced?: bool, offline?: bool, device_id?: ?string, latitude?: ?float, longitude?: ?float, location_accuracy?: ?int, client_uuid?: ?string, scanned_at?: ?Carbon}  $attributes
      */
     public function record(User $agent, ?Pass $pass, ScanResult $result, array $attributes = []): Scan
     {
@@ -79,6 +125,7 @@ class PassScanner
                 'user_id' => $agent->id,
                 'direction' => $direction,
                 'result' => $result,
+                'method' => $attributes['method'] ?? ScanMethod::Qr,
                 'reason' => $attributes['reason'] ?? null,
                 'forced' => $attributes['forced'] ?? false,
                 'offline' => $attributes['offline'] ?? false,

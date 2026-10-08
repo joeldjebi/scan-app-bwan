@@ -2,7 +2,7 @@ openapi: 3.0.3
 
 info:
   title: Pass Parking — API application agents
-  version: 1.4.0
+  version: 1.5.0
   description: |
     API REST de l'application mobile des **agents parking** et des **chefs agent parking**.
 
@@ -53,13 +53,24 @@ info:
       permission de localisation à la connexion ; si la position est indisponible, omettez ces
       champs (le passage est quand même enregistré).
 
-    ## 3. Contenu du QR code
+    ## 3. Identifier le véhicule : QR code ou immatriculation
 
-    Envoyez le contenu **brut** du QR code dans `code` :
+    **QR code** (cas normal) : envoyez le contenu **brut** du QR code dans `code` :
     - URL complète : `https://pass.exemple.com/p/o5kZFFrJ3NA8` ;
     - ou jeton seul : `o5kZFFrJ3NA8`.
 
     Tout autre contenu renvoie `reason = unknown_pass`.
+
+    **Saisie manuelle** (QR code oublié, abîmé ou illisible) : envoyez l'immatriculation dans
+    `plate` à la place de `code`, dans **n'importe quel format** : `1234 AB 01`, `1234-ab-01` et
+    `1234ab01` désignent le même véhicule (espaces, tirets, points et casse sont ignorés).
+    - Les contrôles sont exactement les mêmes qu'avec le QR code.
+    - Seuls les véhicules des événements de l'agent sont trouvés (`unknown_plate` sinon).
+    - Si le véhicule a un pass sur **plusieurs** événements de l'agent : `reason = multiple_matches`
+      et la liste `matches` ; faites choisir l'événement puis renvoyez la requête avec
+      `code = matches[i].pass.token`.
+    - Chaque passage enregistre `method` (`qr` ou `plate`) : les saisies manuelles sont signalées
+      dans les historiques et les statistiques du chef.
 
     ## 4. Droits
 
@@ -83,6 +94,8 @@ info:
     | `event_closed` | L'événement est clôturé. | oui | **non** (aucune exception) |
     | `not_registered` | Aucun véhicule n'est enregistré sur ce pass. | oui | oui |
     | `revoked` | Ce pass a été révoqué. | oui | oui |
+    | `unknown_plate` | Aucun véhicule enregistré avec cette immatriculation sur vos événements. | non | non |
+    | `multiple_matches` | Ce véhicule a un pass sur plusieurs de vos événements : choisissez l'événement. | non (voir `matches`) | non |
 
     Affichez `message` (en français) ; utilisez `reason` et `can_force` pour la logique de l'app.
 
@@ -90,6 +103,8 @@ info:
 
     1. Quand le réseau est disponible : `GET /sync` (première fois), puis `GET /sync?since=<server_time>`.
        Une seule synchro couvre **tous** les événements de l'agent. Fusionnez les pass par `id`.
+       Pour la saisie manuelle hors ligne, comparez la plaque saisie (sans espaces, tirets ni
+       points, en majuscules) à `vehicle.plate_key`.
     2. Sans réseau : retrouvez le pass par `token`, appliquez les règles du §5, comparez le véhicule,
        mettez à jour `presence` localement et mettez le passage en file d'attente avec un `client_uuid`
        et l'heure du scan.
@@ -160,7 +175,7 @@ x-fixtures:
       presence: out
       next_direction: in
       type: { id: 1, name: VIP, code: VIP, color: '#b45309' }
-      vehicle: { plate: 1000 AB 01, brand: Mercedes-Benz, color: Bordeaux, phone: '+2250718898224' }
+      vehicle: { plate: 1000 AB 01, plate_key: 1000AB01, brand: Mercedes-Benz, color: Bordeaux, phone: '+2250718898224' }
       registered_at: '2026-10-07T15:39:44.000000Z'
       last_scanned_at: null
       updated_at: '2026-10-07T15:39:44.000000Z'
@@ -175,7 +190,7 @@ x-fixtures:
       presence: in
       next_direction: out
       type: { id: 1, name: VIP, code: VIP, color: '#b45309' }
-      vehicle: { plate: 1000 AB 01, brand: Mercedes-Benz, color: Bordeaux, phone: '+2250718898224' }
+      vehicle: { plate: 1000 AB 01, plate_key: 1000AB01, brand: Mercedes-Benz, color: Bordeaux, phone: '+2250718898224' }
       registered_at: '2026-10-07T15:39:44.000000Z'
       last_scanned_at: '2026-10-14T18:03:12.000000Z'
       updated_at: '2026-10-14T18:03:12.000000Z'
@@ -205,7 +220,7 @@ x-fixtures:
       presence: out
       next_direction: in
       type: { id: 1, name: VIP, code: VIP, color: '#b45309' }
-      vehicle: { plate: 1001 AB 01, brand: Hyundai, color: Gris, phone: '+2250712345678' }
+      vehicle: { plate: 1001 AB 01, plate_key: 1001AB01, brand: Hyundai, color: Gris, phone: '+2250712345678' }
       registered_at: '2026-10-07T15:39:44.000000Z'
       last_scanned_at: null
       updated_at: '2026-10-08T09:12:00.000000Z'
@@ -215,6 +230,7 @@ x-fixtures:
       client_uuid: 6f1c1c1e-0b7e-4f7a-9d6e-2c1a3b4c5d6e
       direction: in
       result: granted
+      method: qr
       reason: null
       forced: false
       offline: false
@@ -388,6 +404,10 @@ paths:
                 summary: Jeton seul
                 value:
                   code: o5kZFFrJ3NA8
+              plaque:
+                summary: Saisie manuelle de l'immatriculation (tout format)
+                value:
+                  plate: 1000-ab-01
       responses:
         '200':
           description: Résultat de la vérification.
@@ -402,9 +422,35 @@ paths:
                     valid: true
                     reason: null
                     message: Pass valide.
+                    method: qr
                     can_force: false
                     event: *EventRef
                     pass: *PassRegistered
+                    matches: []
+                plaque_inconnue:
+                  summary: Immatriculation saisie inconnue
+                  value:
+                    valid: false
+                    reason: unknown_plate
+                    message: Aucun véhicule enregistré avec cette immatriculation sur vos événements.
+                    method: plate
+                    can_force: false
+                    event: null
+                    pass: null
+                    matches: []
+                plusieurs_evenements:
+                  summary: Plaque présente sur 2 événements de l'agent
+                  value:
+                    valid: false
+                    reason: multiple_matches
+                    message: "Ce véhicule a un pass sur plusieurs de vos événements : choisissez l'événement."
+                    method: plate
+                    can_force: false
+                    event: null
+                    pass: null
+                    matches:
+                      - event: *EventRef
+                        pass: *PassRegistered
                 non_enregistre_agent:
                   summary: Aucun véhicule enregistré (agent)
                   value:
@@ -493,6 +539,11 @@ paths:
                   latitude: 5.3197012
                   longitude: -4.0167293
                   accuracy: 12
+              plaque:
+                summary: Valider par saisie de l'immatriculation
+                value:
+                  plate: 1000 AB 01
+                  client_uuid: 2b8f1c3e-7d4a-4e5f-9a6b-1c2d3e4f5a6b
               sortie:
                 summary: Imposer le sens (poste de sortie)
                 value:
@@ -553,18 +604,21 @@ paths:
                     message: Aucun véhicule n'est enregistré sur ce pass.
                     reason: not_registered
                     can_force: false
+                    matches: []
                 chef_peut_forcer:
                   summary: Chef sans `force` — peut renvoyer avec force=true
                   value:
                     message: Ce pass a été révoqué.
                     reason: revoked
                     can_force: true
+                    matches: []
                 non_affecte:
                   summary: Pass d'un autre événement
                   value:
                     message: Vous n'êtes pas affecté à l'événement de ce pass.
                     reason: not_assigned
                     can_force: false
+                    matches: []
                 validation:
                   summary: Erreur de validation
                   value:
@@ -599,6 +653,7 @@ paths:
                     client_uuid: 1d2c3b4a-5e6f-4a7b-8c9d-0e1f2a3b4c5d
                     direction: in
                     result: denied
+                    method: qr
                     reason: unknown_pass
                     forced: false
                     offline: false
@@ -676,7 +731,7 @@ paths:
                 $ref: '#/components/schemas/Stats'
               example:
                 passes: { total: 60, pending: 52, registered: 8, revoked: 0, inside: 3 }
-                scans: { entries: 5, exits: 2, denied: 1 }
+                scans: { entries: 5, exits: 2, denied: 1, manual: 1 }
                 by_type:
                   - { id: 1, name: VIP, color: '#b45309', total: 20, registered: 8, inside: 3 }
                   - { id: 2, name: Staff, color: '#059669', total: 30, registered: 0, inside: 0 }
@@ -961,15 +1016,22 @@ components:
       enum: [granted, denied]
       description: '`granted` = passage validé, `denied` = refus tracé.'
 
+    ScanMethod:
+      type: string
+      enum: [qr, plate]
+      description: '`qr` = QR code scanné, `plate` = immatriculation saisie par l''agent.'
+
     RefusalReason:
       type: string
-      enum: [unknown_pass, not_assigned, event_closed, not_registered, revoked]
+      enum: [unknown_pass, not_assigned, event_closed, not_registered, revoked, unknown_plate, multiple_matches]
       description: |
         - `unknown_pass` : QR code inconnu
         - `not_assigned` : pass d'un événement auquel l'utilisateur n'est pas affecté
         - `event_closed` : événement clôturé
         - `not_registered` : aucun véhicule enregistré sur le pass
         - `revoked` : pass révoqué
+        - `unknown_plate` : immatriculation saisie inconnue sur les événements de l'utilisateur
+        - `multiple_matches` : immatriculation présente sur plusieurs événements (voir `matches`)
 
     # ---------- Ressources ----------
 
@@ -1086,12 +1148,16 @@ components:
     Vehicle:
       type: object
       description: Véhicule enregistré par l'usager.
-      required: [plate, brand, color, phone]
+      required: [plate, plate_key, brand, color, phone]
       properties:
         plate:
           type: string
-          description: Immatriculation en majuscules.
+          description: Immatriculation lisible, en majuscules (à afficher).
           example: 1000 AB 01
+        plate_key:
+          type: string
+          description: Immatriculation uniformisée (sans espaces, tirets ni points) — clé de recherche hors ligne.
+          example: 1000AB01
         brand:
           type: string
           example: Mercedes-Benz
@@ -1183,7 +1249,7 @@ components:
     Scan:
       type: object
       description: Un passage.
-      required: [id, client_uuid, direction, result, reason, forced, offline, scanned_at, location, event, pass]
+      required: [id, client_uuid, direction, result, method, reason, forced, offline, scanned_at, location, event, pass]
       properties:
         id:
           type: integer
@@ -1196,6 +1262,8 @@ components:
           $ref: '#/components/schemas/Direction'
         result:
           $ref: '#/components/schemas/ScanResult'
+        method:
+          $ref: '#/components/schemas/ScanMethod'
         reason:
           type: string
           nullable: true
@@ -1269,28 +1337,36 @@ components:
 
     VerifyRequest:
       type: object
-      required: [code]
+      description: Envoyer `code` (QR code) **ou** `plate` (saisie manuelle).
       properties:
         code:
           type: string
           maxLength: 500
+          nullable: true
           description: Contenu brut du QR code (URL complète ou jeton).
+        plate:
+          type: string
+          maxLength: 20
+          nullable: true
+          description: Immatriculation saisie par l'agent, dans n'importe quel format.
 
     VerifyResponse:
       type: object
-      required: [valid, reason, message, can_force, event, pass]
+      required: [valid, reason, message, method, can_force, event, pass, matches]
       properties:
         valid:
           type: boolean
           description: '`true` → afficher l''écran vert et le bouton « Valider ».'
         reason:
           type: string
-          enum: [unknown_pass, not_assigned, event_closed, not_registered, revoked, null]
+          enum: [unknown_pass, not_assigned, event_closed, not_registered, revoked, unknown_plate, multiple_matches, null]
           nullable: true
           description: Motif (`RefusalReason`) ; `null` si `valid = true`.
         message:
           type: string
           description: Message en français à afficher.
+        method:
+          $ref: '#/components/schemas/ScanMethod'
         can_force:
           type: boolean
           description: '`true` si l''utilisateur (chef de l''événement / admin) peut forcer ce pass non valide.'
@@ -1306,15 +1382,36 @@ components:
             - $ref: '#/components/schemas/Pass'
           nullable: true
           description: '`null` pour `unknown_pass` et `not_assigned`.'
+        matches:
+          type: array
+          description: Uniquement pour `multiple_matches` (saisie manuelle) — sinon vide.
+          items:
+            $ref: '#/components/schemas/PlateMatch'
+
+    PlateMatch:
+      type: object
+      description: Pass correspondant à l'immatriculation saisie, sur l'un des événements de l'agent.
+      required: [event, pass]
+      properties:
+        event:
+          $ref: '#/components/schemas/EventRef'
+        pass:
+          $ref: '#/components/schemas/Pass'
 
     ScanRequest:
       type: object
-      required: [code]
+      description: Envoyer `code` (QR code) **ou** `plate` (saisie manuelle).
       properties:
         code:
           type: string
           maxLength: 500
+          nullable: true
           description: Contenu brut du QR code (URL complète ou jeton).
+        plate:
+          type: string
+          maxLength: 20
+          nullable: true
+          description: Immatriculation saisie par l'agent (tout format). Le passage est marqué `method = plate`.
         direction:
           type: string
           enum: [in, out, null]
@@ -1385,7 +1482,7 @@ components:
     ScanRefused:
       type: object
       description: Passage refusé par le serveur (pass non valide).
-      required: [message, reason, can_force]
+      required: [message, reason, can_force, matches]
       properties:
         message:
           type: string
@@ -1395,10 +1492,16 @@ components:
         can_force:
           type: boolean
           description: '`true` → le chef peut renvoyer la requête avec `force: true`.'
+        matches:
+          type: array
+          description: Pass correspondants si `reason = multiple_matches`.
+          items:
+            $ref: '#/components/schemas/PlateMatch'
 
     BatchScanItem:
       type: object
-      required: [client_uuid, code, result, direction, scanned_at]
+      description: '`code` (QR code) **ou** `plate` (saisie manuelle).'
+      required: [client_uuid, result, direction, scanned_at]
       properties:
         client_uuid:
           type: string
@@ -1407,6 +1510,12 @@ components:
         code:
           type: string
           maxLength: 500
+          nullable: true
+        plate:
+          type: string
+          maxLength: 20
+          nullable: true
+          description: Immatriculation saisie hors ligne (tout format).
         result:
           $ref: '#/components/schemas/ScanResult'
         direction:
@@ -1532,7 +1641,7 @@ components:
               description: Véhicules actuellement dans le parking.
         scans:
           type: object
-          required: [entries, exits, denied]
+          required: [entries, exits, denied, manual]
           properties:
             entries:
               type: integer
@@ -1540,6 +1649,9 @@ components:
               type: integer
             denied:
               type: integer
+            manual:
+              type: integer
+              description: Passages identifiés par saisie de l'immatriculation (sans QR code).
         by_type:
           type: array
           items:

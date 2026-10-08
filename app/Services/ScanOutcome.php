@@ -19,12 +19,18 @@ final class ScanOutcome
 
     public const REVOKED = 'revoked';
 
+    public const UNKNOWN_PLATE = 'unknown_plate';
+
+    public const MULTIPLE_MATCHES = 'multiple_matches';
+
     private const MESSAGES = [
         self::UNKNOWN_PASS => 'QR code inconnu.',
         self::NOT_ASSIGNED => 'Vous n\'êtes pas affecté à l\'événement de ce pass.',
         self::EVENT_CLOSED => 'L\'événement est clôturé.',
         self::NOT_REGISTERED => 'Aucun véhicule n\'est enregistré sur ce pass.',
         self::REVOKED => 'Ce pass a été révoqué.',
+        self::UNKNOWN_PLATE => 'Aucun véhicule enregistré avec cette immatriculation sur vos événements.',
+        self::MULTIPLE_MATCHES => 'Ce véhicule a un pass sur plusieurs de vos événements : choisissez l\'événement.',
     ];
 
     public function __construct(

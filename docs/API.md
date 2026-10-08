@@ -23,7 +23,7 @@
 | POST | `/auth/login` | tous | `{phone, password, device_name}` → `{token, user}` (connexion par **numéro de téléphone**) |
 | GET | `/auth/me` | tous | Vérifie que le token est valide |
 | POST | `/auth/logout` | tous | Révoque le token |
-| POST | `/verify` | tous | `{code}` → `{valid, reason, message, can_force, event, pass}`. N'enregistre rien. |
+| POST | `/verify` | tous | `{code}` **ou** `{plate}` → `{valid, reason, message, method, can_force, event, pass, matches}`. N'enregistre rien. |
 | POST | `/scans` | tous | `{code, client_uuid}` → valide le passage (sens automatique). `422` si le pass n'est pas valide. |
 | GET | `/scans/history` | tous | Mes passages, 30 par page |
 | GET | `/events` | chef | Ses événements, avec `can_supervise` |
@@ -36,6 +36,8 @@
 
 1. Scan → `POST /verify { code: "<contenu brut du QR>" }`
 2. Si `valid = true` : afficher le type (couleur), l'**immatriculation**, la marque, la couleur et le sens (`next_direction`), puis le bouton **Valider** → `POST /scans { code, client_uuid, latitude, longitude, accuracy }`. La position GPS de l'agent est enregistrée à chaque passage (facultative si indisponible).
+**QR code illisible ou oublié** : l'agent saisit l'immatriculation et l'app envoie `plate` à la place de `code`, sur les mêmes routes. Le format est libre (`1234 AB 01` = `1234-ab-01` = `1234ab01`), et le passage est marqué « saisie manuelle » dans les historiques.
+
 3. Si `valid = false` : afficher `message`. Si `can_force = true` (chef) : bouton **Forcer** → `POST /scans { code, force: true }`.
 
 ## Motifs de refus
@@ -47,3 +49,5 @@
 | `event_closed` | Événement clôturé | non |
 | `not_registered` | Aucun véhicule enregistré | oui |
 | `revoked` | Pass révoqué | oui |
+| `unknown_plate` | Immatriculation saisie inconnue sur mes événements | non |
+| `multiple_matches` | Immatriculation présente sur plusieurs de mes événements : choisir dans `matches`, puis renvoyer avec `code = matches[i].pass.token` | non |

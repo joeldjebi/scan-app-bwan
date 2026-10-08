@@ -109,6 +109,20 @@ class OpenApiContractTest extends TestCase
             }
         }
 
+        // Saisie manuelle de l'immatriculation : plaque connue, inconnue, présente sur 2 événements.
+        Sanctum::actingAs($this->agent);
+        $plate = $this->pass('registered')->vehicle->plate;
+        $twin = PassType::factory()->create();
+        $twin->event->staff()->attach($this->agent->id, ['role' => StaffRole::Agent->value]);
+        $duplicate = Pass::factory()->registered(['plate' => 'AA 111 BB'])->create(['pass_type_id' => $twin->id]);
+        Pass::factory()->registered(['plate' => 'AA-111-BB'])->create(['pass_type_id' => $this->type->id]);
+
+        foreach ([$plate, 'ZZ 999 ZZ', 'aa111bb'] as $value) {
+            $this->contract('post', '/verify', $this->postJson('/api/v1/verify', ['plate' => $value]), 200, ['plate' => $value]);
+        }
+        $this->contract('post', '/scans', $this->postJson('/api/v1/scans', ['plate' => 'aa111bb']), 422, ['plate' => 'aa111bb']);
+        $this->contract('post', '/scans', $this->postJson('/api/v1/scans', ['plate' => $plate]), 201, ['plate' => $plate]);
+
         $this->contract('post', '/verify', $this->postJson('/api/v1/verify', []), 422);
     }
 

@@ -7,6 +7,7 @@ use App\Enums\ScanResult;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\PassResource;
 use App\Http\Resources\ScanResource;
+use App\Models\Pass;
 use App\Models\Scan;
 use App\Services\AuditLogger;
 use App\Services\PassScanner;
@@ -14,6 +15,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 
 /**
@@ -30,17 +32,19 @@ class ScanController extends Controller
      */
     public function verify(Request $request): JsonResponse
     {
-        $request->validate(['code' => ['required', 'string', 'max:500']]);
+        $request->validate(self::identificationRules());
 
-        $outcome = $this->scanner->check($request->user(), $this->scanner->find($request->code));
+        ['outcome' => $outcome, 'method' => $method, 'matches' => $matches] = $this->scanner->resolve($request->user(), $request->code, $request->plate);
 
         return response()->json([
             'valid' => $outcome->isValid(),
             'reason' => $outcome->reason,
             'message' => $outcome->message(),
+            'method' => $method,
             'can_force' => $this->scanner->canForce($request->user(), $outcome),
             'event' => $outcome->pass ? $outcome->pass->event->only(['id', 'name']) : null,
             'pass' => $outcome->pass ? new PassResource($outcome->pass) : null,
+            'matches' => $this->matches($matches),
         ]);
     }
 
@@ -51,7 +55,7 @@ class ScanController extends Controller
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'code' => ['required', 'string', 'max:500'],
+            ...self::identificationRules(),
             'result' => ['nullable', Rule::enum(ScanResult::class)],
             'direction' => ['nullable', Rule::enum(Direction::class)],
             'reason' => ['nullable', 'string', 'max:255'],
@@ -66,8 +70,18 @@ class ScanController extends Controller
         }
 
         $user = $request->user();
-        $outcome = $this->scanner->check($user, $this->scanner->find($data['code']));
+        ['outcome' => $outcome, 'method' => $method, 'matches' => $matches] = $this->scanner->resolve($user, $data['code'] ?? null, $data['plate'] ?? null);
         $result = ScanResult::from($data['result'] ?? ScanResult::Granted->value);
+
+        // Plaque présente sur plusieurs événements : l'app doit d'abord faire choisir le pass.
+        if ($matches->isNotEmpty()) {
+            return response()->json([
+                'message' => $outcome->message(),
+                'reason' => $outcome->reason,
+                'can_force' => false,
+                'matches' => $this->matches($matches),
+            ], 422);
+        }
         $forced = false;
 
         if ($result === ScanResult::Granted && ! $outcome->isValid()) {
@@ -78,6 +92,7 @@ class ScanController extends Controller
                     'message' => $outcome->message(),
                     'reason' => $outcome->reason,
                     'can_force' => $canForce,
+                    'matches' => [],
                 ], 422);
             }
 
@@ -86,6 +101,7 @@ class ScanController extends Controller
 
         $scan = $this->scanner->record($user, $outcome->pass, $result, [
             'direction' => isset($data['direction']) ? Direction::from($data['direction']) : null,
+            'method' => $method,
             'reason' => $data['reason'] ?? $outcome->reason,
             'forced' => $forced,
             'device_id' => $data['device_id'] ?? null,
@@ -112,7 +128,8 @@ class ScanController extends Controller
         $data = $request->validate([
             'scans' => ['required', 'array', 'max:500'],
             'scans.*.client_uuid' => ['required', 'uuid', 'distinct'],
-            'scans.*.code' => ['required', 'string', 'max:500'],
+            'scans.*.code' => ['required_without:scans.*.plate', 'nullable', 'string', 'max:500'],
+            'scans.*.plate' => ['required_without:scans.*.code', 'nullable', 'string', 'max:20'],
             'scans.*.result' => ['required', Rule::enum(ScanResult::class)],
             'scans.*.direction' => ['required', Rule::enum(Direction::class)],
             'scans.*.scanned_at' => ['required', 'date'],
@@ -132,10 +149,11 @@ class ScanController extends Controller
                 }
 
                 // La décision prise hors ligne est conservée ; seul le rattachement à l'événement est contrôlé.
-                $outcome = $this->scanner->check($user, $this->scanner->find($item['code']));
+                ['outcome' => $outcome, 'method' => $method] = $this->scanner->resolve($user, $item['code'] ?? null, $item['plate'] ?? null);
 
                 $this->scanner->record($user, $outcome->pass, ScanResult::from($item['result']), [
                     'direction' => Direction::from($item['direction']),
+                    'method' => $method,
                     'reason' => $item['reason'] ?? ($outcome->pass ? null : $outcome->reason),
                     'forced' => $item['forced'] ?? false,
                     'offline' => true,
@@ -173,6 +191,32 @@ class ScanController extends Controller
             ->paginate(30);
 
         return ScanResource::collection($scans);
+    }
+
+    /**
+     * Le véhicule est identifié par le contenu du QR code, ou par son immatriculation
+     * saisie par l'agent (n'importe quel format : espaces, tirets et casse sont ignorés).
+     *
+     * @return array<string, list<string>>
+     */
+    private static function identificationRules(): array
+    {
+        return [
+            'code' => ['required_without:plate', 'nullable', 'string', 'max:500'],
+            'plate' => ['required_without:code', 'nullable', 'string', 'max:20'],
+        ];
+    }
+
+    /**
+     * @param  Collection<int, Pass>  $matches
+     * @return list<array{event: array{id: int, name: string}, pass: PassResource}>
+     */
+    private function matches(Collection $matches): array
+    {
+        return $matches->map(fn (Pass $pass) => [
+            'event' => $pass->event->only(['id', 'name']),
+            'pass' => new PassResource($pass),
+        ])->values()->all();
     }
 
     /**

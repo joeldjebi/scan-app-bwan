@@ -24,6 +24,12 @@
                 <option value="{{ $agent->id }}" @selected((string) request('agent') === (string) $agent->id)>{{ $agent->name }}</option>
             @endforeach
         </select>
+        <select name="method" class="{{ $input }}">
+            <option value="">QR code et saisie</option>
+            @foreach (\App\Enums\ScanMethod::cases() as $method)
+                <option value="{{ $method->value }}" @selected(request('method') === $method->value)>{{ $method->label() }}</option>
+            @endforeach
+        </select>
         <button class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white">Filtrer</button>
     </form>
 

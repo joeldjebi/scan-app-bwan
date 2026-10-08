@@ -19,6 +19,7 @@ class ScanController extends Controller
             ->when($request->result, fn ($query, $result) => $query->where('result', $result))
             ->when($request->direction, fn ($query, $direction) => $query->where('direction', $direction))
             ->when($request->agent, fn ($query, $agent) => $query->where('user_id', $agent))
+            ->when($request->method, fn ($query, $method) => $query->where('method', $method))
             ->latest('scanned_at')
             ->paginate(50)
             ->withQueryString();

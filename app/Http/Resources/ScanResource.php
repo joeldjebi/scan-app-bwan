@@ -16,6 +16,7 @@ class ScanResource extends JsonResource
             'client_uuid' => $this->client_uuid,
             'direction' => $this->direction,
             'result' => $this->result,
+            'method' => $this->method,
             'reason' => $this->reason,
             'forced' => $this->forced,
             'offline' => $this->offline,

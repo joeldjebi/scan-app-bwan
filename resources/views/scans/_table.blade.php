@@ -51,6 +51,7 @@
                     <td class="px-5 py-2">
                         <span class="rounded-full px-2 py-0.5 text-xs font-medium {{ $scan->result === \App\Enums\ScanResult::Granted ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800' }}">{{ $scan->result->label() }}</span>
                         @if ($scan->forced) <span class="ml-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">forcé</span> @endif
+                        @if ($scan->method === \App\Enums\ScanMethod::Plate) <span class="ml-1 rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-800" title="Véhicule identifié par saisie de l'immatriculation, sans QR code">saisie manuelle</span> @endif
                         @if ($scan->offline) <span class="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">hors ligne</span> @endif
                         @if ($scan->reason) <span class="ml-1 text-xs text-slate-500">{{ \App\Services\ScanOutcome::label($scan->reason) }}</span> @endif
                     </td>
