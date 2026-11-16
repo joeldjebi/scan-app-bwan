@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Enums\Direction;
 use App\Enums\PartnerAbility;
 use App\Enums\StaffRole;
 use App\Models\AuditLog;
@@ -149,5 +150,35 @@ class PartnerBackOfficeTest extends TestCase
         $partner = Partner::factory()->create();
 
         $this->actingAs(User::factory()->create())->get(route('partners.scans', $partner))->assertForbidden();
+    }
+
+    public function test_admin_deletes_partner_keeping_its_scan_history(): void
+    {
+        $partner = Partner::factory()->create(['name' => 'Sécurité Plus']);
+        $partner->events()->attach($this->event);
+        [, $key] = $partner->issueApiKey('Prod', PartnerAbility::cases());
+        $pass = Pass::factory()->registered()->create(['pass_type_id' => PassType::factory()->create(['event_id' => $this->event->id])->id]);
+        $this->withToken($key)->postJson('/api/partner/v1/scans', ['code' => $pass->token, 'operator_ref' => 'AG-1'])->assertCreated();
+
+        $this->actingAs($this->admin)->delete(route('partners.destroy', $partner))->assertRedirect(route('partners.index'));
+
+        $this->assertSoftDeleted($partner);
+        $this->assertNotNull($partner->apiKeys()->sole()->revoked_at);
+        $this->assertSame(0, $partner->events()->count());
+        $this->withToken($key)->getJson('/api/partner/v1/events')->assertUnauthorized();
+
+        $this->get(route('partners.index'))->assertSee('supprimé');
+        $this->get(route('partners.index'))->assertDontSee('Sécurité Plus');
+        $this->get(route('partners.show', $partner))->assertNotFound();
+        $this->get(route('events.scans.index', $this->event))->assertOk()->assertSee('Sécurité Plus (supprimé) · AG-1');
+        $this->assertSame(Direction::In, $pass->fresh()->presence);
+    }
+
+    public function test_non_admin_cannot_delete_partner(): void
+    {
+        $partner = Partner::factory()->create();
+
+        $this->actingAs(User::factory()->create())->delete(route('partners.destroy', $partner))->assertForbidden();
+        $this->assertNotSoftDeleted($partner);
     }
 }

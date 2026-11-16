@@ -58,7 +58,7 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::patch('brands/{brand}/toggle', [BrandController::class, 'toggle'])->name('brands.toggle');
 
         // Partenaires de l'API : fiche, accès aux événements, clés API et webhooks.
-        Route::resource('partners', PartnerController::class)->except('destroy');
+        Route::resource('partners', PartnerController::class);
         Route::prefix('partners/{partner}')->name('partners.')->group(function () {
             Route::get('scans', [PartnerScanController::class, 'index'])->name('scans');
             Route::post('keys', [PartnerController::class, 'storeKey'])->name('keys.store');

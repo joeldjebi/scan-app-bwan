@@ -79,6 +79,16 @@ class PartnerController extends Controller
     }
 
     /**
+     * Supprime le partenaire : il perd aussitôt l'accès à l'API, son historique de passages est conservé.
+     */
+    public function destroy(Partner $partner): RedirectResponse
+    {
+        $partner->deleteKeepingHistory();
+
+        return redirect()->route('partners.index')->with('success', "Partenaire « {$partner->name} » supprimé : ses clés sont révoquées, ses passages restent dans l'historique.");
+    }
+
+    /**
      * Génère une clé API : elle n'est affichée qu'une seule fois.
      */
     public function storeKey(Request $request, Partner $partner): RedirectResponse

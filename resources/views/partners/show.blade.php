@@ -213,4 +213,17 @@
             </table>
         </div>
     </section>
+    {{-- Suppression --}}
+    <section class="mt-6 rounded-xl border border-red-200 bg-white shadow-sm">
+        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-4">
+            <div>
+                <h2 class="font-semibold text-red-700">Supprimer le partenaire</h2>
+                <p class="text-xs text-slate-500">Ses clés API sont révoquées et ses accès aux événements retirés immédiatement. Ses {{ number_format($scansCount, 0, ',', ' ') }} passage(s) restent dans l'historique des événements, à son nom.</p>
+            </div>
+            <form method="POST" action="{{ route('partners.destroy', $partner) }}" onsubmit="return confirm(@js("Supprimer le partenaire « {$partner->name} » ? Il ne pourra plus appeler l'API. Cette action est définitive."))">
+                @csrf @method('DELETE')
+                <button class="rounded-lg border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100">Supprimer</button>
+            </form>
+        </div>
+    </section>
 @endsection

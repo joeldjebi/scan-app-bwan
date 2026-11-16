@@ -12,7 +12,9 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
@@ -24,7 +26,7 @@ use Illuminate\Support\Str;
 class Partner extends Model implements ScanActor
 {
     /** @use HasFactory<PartnerFactory> */
-    use Auditable, HasFactory;
+    use Auditable, HasFactory, SoftDeletes;
 
     /**
      * @var list<string>
@@ -103,6 +105,21 @@ class Partner extends Model implements ScanActor
         $this->forceFill(['webhook_secret' => $secret])->save();
 
         return $secret;
+    }
+
+    /**
+     * Supprime le partenaire en conservant son historique : ses clés sont révoquées, ses accès aux
+     * événements retirés et ses webhooks en attente abandonnés. Ses passages restent à son nom.
+     */
+    public function deleteKeepingHistory(): void
+    {
+        DB::transaction(function () {
+            $this->apiKeys()->whereNull('revoked_at')->update(['revoked_at' => now()]);
+            $this->events()->detach();
+            $this->webhookDeliveries()->where('status', WebhookDelivery::PENDING)
+                ->update(['status' => WebhookDelivery::FAILED, 'last_error' => 'Partenaire supprimé.']);
+            $this->delete();
+        });
     }
 
     public function hasWebhook(): bool

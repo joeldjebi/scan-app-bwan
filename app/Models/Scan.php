@@ -57,7 +57,7 @@ class Scan extends Model
      */
     public function partner(): BelongsTo
     {
-        return $this->belongsTo(Partner::class);
+        return $this->belongsTo(Partner::class)->withTrashed();
     }
 
     /**
@@ -66,7 +66,9 @@ class Scan extends Model
     public function operatorName(): ?string
     {
         if ($this->partner_id) {
-            return trim(($this->partner?->name ?? 'Partenaire').($this->operator_ref ? " · {$this->operator_ref}" : ''));
+            $name = ($this->partner?->name ?? 'Partenaire').($this->partner?->trashed() ? ' (supprimé)' : '');
+
+            return trim($name.($this->operator_ref ? " · {$this->operator_ref}" : ''));
         }
 
         return $this->agent?->name;

@@ -24,7 +24,7 @@ class AuthenticatePartner implements AuthenticatesRequests
         $plain = $request->bearerToken() ?? $request->header('X-Api-Key');
         $key = $plain ? PartnerApiKey::findByPlainKey($plain) : null;
 
-        if (! $key || ! $key->isUsable() || ! $key->partner->is_active) {
+        if (! $key || ! $key->isUsable() || ! $key->partner?->is_active) {
             return self::error(401, 'invalid_api_key', 'Clé API absente, invalide, expirée ou révoquée.');
         }
 
