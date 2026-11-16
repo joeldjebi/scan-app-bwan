@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\EventController;
+use App\Http\Controllers\Api\Partner\EventController as PartnerEventController;
+use App\Http\Controllers\Api\Partner\ScanController as PartnerScanController;
 use App\Http\Controllers\Api\ScanController;
 use App\Http\Controllers\Api\SyncController;
 use Illuminate\Support\Facades\Route;
@@ -27,4 +29,13 @@ Route::prefix('v1')->group(function () {
             Route::get('scans', [EventController::class, 'scans']);
         });
     });
+});
+
+// API partenaire : entités extérieures authentifiées par clé API (voir docs/openapi-partner.yaml).
+Route::prefix('partner/v1')->middleware('throttle:partner-api')->group(function () {
+    Route::get('events', [PartnerEventController::class, 'index'])->middleware('partner');
+    Route::post('verify', [PartnerScanController::class, 'verify'])->middleware('partner:scans:verify');
+    Route::post('scans', [PartnerScanController::class, 'store'])->middleware('partner:scans:write');
+    Route::get('scans', [PartnerScanController::class, 'index'])->middleware('partner:scans:read');
+    Route::get('scans/{scan}', [PartnerScanController::class, 'show'])->middleware('partner:scans:read');
 });

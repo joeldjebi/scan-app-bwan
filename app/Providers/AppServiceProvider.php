@@ -4,8 +4,11 @@ namespace App\Providers;
 
 use App\Models\Event;
 use App\Models\User;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Pagination\Paginator;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\URL;
 use Illuminate\Support\ServiceProvider;
 
@@ -44,5 +47,13 @@ class AppServiceProvider extends ServiceProvider
 
         // Admin ou chef agent de l'événement : supervision, révocation, passage forcé.
         Gate::define('supervise', fn (User $user, Event $event) => $user->canSupervise($event));
+
+        // API partenaire : quota par clé API (l'authentification s'exécute avant).
+        RateLimiter::for('partner-api', fn (Request $request) => Limit::perMinute(config('parking.partner_rate_limit'))
+            ->by('partner-key:'.($request->attributes->get('partner_api_key')?->id ?? $request->ip()))
+            ->response(fn (Request $request, array $headers) => response()->json([
+                'message' => 'Trop de requêtes : réessayez plus tard.',
+                'code' => 'rate_limited',
+            ], 429, $headers)));
     }
 }

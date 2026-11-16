@@ -9,6 +9,7 @@ use App\Models\Event;
 use App\Models\Pass;
 use App\Models\Vehicle;
 use App\Services\DeletionService;
+use App\Services\PartnerWebhooks;
 use App\Services\QrCode;
 use App\Services\VehicleRegistration;
 use Illuminate\Http\RedirectResponse;
@@ -18,6 +19,8 @@ use Illuminate\View\View;
 
 class PassController extends Controller
 {
+    public function __construct(private PartnerWebhooks $webhooks) {}
+
     public function index(Request $request, Event $event): View
     {
         $passes = $this->filtered($request, $event)
@@ -36,7 +39,7 @@ class PassController extends Controller
 
     public function show(Event $event, Pass $pass): View
     {
-        $pass->load(['type', 'vehicle', 'scans' => fn ($query) => $query->with('agent')->latest('scanned_at')]);
+        $pass->load(['type', 'vehicle', 'scans' => fn ($query) => $query->with(['agent', 'partner'])->latest('scanned_at')]);
 
         return view('passes.show', [
             'event' => $event,
@@ -67,6 +70,7 @@ class PassController extends Controller
     public function revoke(Event $event, Pass $pass): RedirectResponse
     {
         $pass->update(['status' => PassStatus::Revoked]);
+        $this->webhooks->passStatusChanged($pass, PartnerWebhooks::PASS_REVOKED);
 
         return back()->with('success', "Pass {$pass->number} révoqué : il sera refusé au scan.");
     }
@@ -74,6 +78,7 @@ class PassController extends Controller
     public function restore(Event $event, Pass $pass): RedirectResponse
     {
         $pass->update(['status' => $pass->vehicle ? PassStatus::Registered : PassStatus::Pending]);
+        $this->webhooks->passStatusChanged($pass, PartnerWebhooks::PASS_RESTORED);
 
         return back()->with('success', "Pass {$pass->number} réactivé.");
     }

@@ -53,6 +53,7 @@
                     @can('admin')
                         <a href="{{ route('users.index') }}" class="rounded-md px-3 py-1.5 text-sm {{ request()->routeIs('users.*') ? 'bg-slate-100 font-medium text-slate-900' : 'text-slate-600 hover:text-slate-900' }}">Comptes</a>
                         <a href="{{ route('brands.index') }}" class="rounded-md px-3 py-1.5 text-sm {{ request()->routeIs('brands.*') ? 'bg-slate-100 font-medium text-slate-900' : 'text-slate-600 hover:text-slate-900' }}">Marques</a>
+                        <a href="{{ route('partners.index') }}" class="rounded-md px-3 py-1.5 text-sm {{ request()->routeIs('partners.*') ? 'bg-slate-100 font-medium text-slate-900' : 'text-slate-600 hover:text-slate-900' }}">Partenaires</a>
                     @endcan
                     @can('owner')
                         <a href="{{ route('audit.index') }}" class="rounded-md px-3 py-1.5 text-sm {{ request()->routeIs('audit.*') ? 'bg-slate-100 font-medium text-slate-900' : 'text-slate-600 hover:text-slate-900' }}">Journal</a>
@@ -73,6 +74,7 @@
             @can('admin')
                 <a href="{{ route('users.index') }}" class="block py-2 text-sm">Comptes</a>
                 <a href="{{ route('brands.index') }}" class="block py-2 text-sm">Marques</a>
+                <a href="{{ route('partners.index') }}" class="block py-2 text-sm">Partenaires</a>
             @endcan
             @can('owner')
                 <a href="{{ route('audit.index') }}" class="block py-2 text-sm">Journal</a>

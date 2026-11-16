@@ -6,7 +6,10 @@ use App\Http\Controllers\Web\AuthController;
 use App\Http\Controllers\Web\BrandController;
 use App\Http\Controllers\Web\DashboardController;
 use App\Http\Controllers\Web\EventController;
+use App\Http\Controllers\Web\EventPartnerController;
 use App\Http\Controllers\Web\ExportController;
+use App\Http\Controllers\Web\PartnerController;
+use App\Http\Controllers\Web\PartnerScanController;
 use App\Http\Controllers\Web\PassController;
 use App\Http\Controllers\Web\PassTypeController;
 use App\Http\Controllers\Web\PublicPassController;
@@ -20,10 +23,12 @@ use Illuminate\Support\Facades\Route;
 Route::get('p/{token}', [PublicPassController::class, 'show'])->name('public.pass');
 Route::post('p/{token}', [PublicPassController::class, 'register'])->middleware('throttle:10,1')->name('public.pass.register');
 
-// Documentation Swagger de l'API mobile (désactivable via API_DOCS_ENABLED=false).
+// Documentation Swagger des API mobile et partenaires (désactivable via API_DOCS_ENABLED=false).
 Route::middleware('api-docs')->group(function () {
     Route::get('docs/api', [ApiDocController::class, 'index'])->name('api-docs');
     Route::get('docs/api/openapi.yaml', [ApiDocController::class, 'spec'])->name('api-docs.spec');
+    Route::get('docs/api/partner', [ApiDocController::class, 'partner'])->name('api-docs.partner');
+    Route::get('docs/api/partner/openapi.yaml', [ApiDocController::class, 'partnerSpec'])->name('api-docs.partner.spec');
 });
 
 Route::middleware('guest')->group(function () {
@@ -51,6 +56,16 @@ Route::middleware(['auth', 'active'])->group(function () {
 
         Route::resource('brands', BrandController::class)->only(['index', 'store', 'update', 'destroy']);
         Route::patch('brands/{brand}/toggle', [BrandController::class, 'toggle'])->name('brands.toggle');
+
+        // Partenaires de l'API : fiche, accès aux événements, clés API et webhooks.
+        Route::resource('partners', PartnerController::class)->except('destroy');
+        Route::prefix('partners/{partner}')->name('partners.')->group(function () {
+            Route::get('scans', [PartnerScanController::class, 'index'])->name('scans');
+            Route::post('keys', [PartnerController::class, 'storeKey'])->name('keys.store');
+            Route::delete('keys/{apiKey}', [PartnerController::class, 'revokeKey'])->scopeBindings()->name('keys.revoke');
+            Route::post('webhook/secret', [PartnerController::class, 'rotateWebhookSecret'])->name('webhook.secret');
+            Route::post('webhook/test', [PartnerController::class, 'testWebhook'])->name('webhook.test');
+        });
 
         Route::prefix('events/{event}')->name('events.')->group(function () {
             Route::scopeBindings()->group(function () {
@@ -86,5 +101,7 @@ Route::middleware(['auth', 'active'])->group(function () {
         Route::post('passes/{pass}/reset', [PassController::class, 'reset'])->name('passes.reset');
         Route::get('scans', [ScanController::class, 'index'])->name('scans.index');
         Route::get('export/passes', [ExportController::class, 'passes'])->name('export.passes');
+        Route::post('partners', [EventPartnerController::class, 'store'])->name('partners.store');
+        Route::delete('partners/{partner}', [EventPartnerController::class, 'destroy'])->name('partners.destroy');
     });
 });

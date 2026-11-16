@@ -36,6 +36,16 @@ class Event extends Model
             ->withTimestamps();
     }
 
+    /**
+     * Partenaires extérieurs autorisés à scanner les pass de cet événement.
+     */
+    public function partners(): BelongsToMany
+    {
+        return $this->belongsToMany(Partner::class, 'event_partner')
+            ->withPivot('granted_by')
+            ->withTimestamps();
+    }
+
     public function chief(): ?User
     {
         return $this->staff->first(fn (User $user) => $user->pivot->role === StaffRole::Chief);

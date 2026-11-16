@@ -6,6 +6,7 @@ use App\Enums\Direction;
 use App\Enums\PassStatus;
 use App\Enums\ScanMethod;
 use App\Enums\ScanResult;
+use App\Models\Partner;
 use App\Models\Pass;
 use App\Models\Scan;
 use App\Models\User;
@@ -40,7 +41,7 @@ class PassScanner
      *
      * @return Collection<int, Pass>
      */
-    public function findByPlate(User $user, string $plate): Collection
+    public function findByPlate(ScanActor $user, string $plate): Collection
     {
         $key = Vehicle::plateKey($plate);
 
@@ -61,7 +62,7 @@ class PassScanner
      *
      * @return array{outcome: ScanOutcome, method: ScanMethod, matches: Collection<int, Pass>}
      */
-    public function resolve(User $user, ?string $code, ?string $plate): array
+    public function resolve(ScanActor $user, ?string $code, ?string $plate): array
     {
         if ($code !== null && $code !== '') {
             $pass = $this->find($code);
@@ -89,12 +90,14 @@ class PassScanner
     /**
      * Vérifie un pass pour un agent : l'événement du pass est déterminé par le pass
      * lui-même, l'agent doit y être affecté (chef ou agent) ou être admin.
+     * Un partenaire sans accès à l'événement reçoit « QR code inconnu » : il ne peut pas
+     * savoir qu'un pass existe en dehors de ses événements.
      */
-    public function check(User $user, ?Pass $pass): ScanOutcome
+    public function check(ScanActor $user, ?Pass $pass): ScanOutcome
     {
         $reason = match (true) {
             $pass === null => ScanOutcome::UNKNOWN_PASS,
-            ! $user->canOperate($pass->event) => ScanOutcome::NOT_ASSIGNED,
+            ! $user->canOperate($pass->event) => $user instanceof Partner ? ScanOutcome::UNKNOWN_PASS : ScanOutcome::NOT_ASSIGNED,
             $pass->event->isClosed() => ScanOutcome::EVENT_CLOSED,
             $pass->status === PassStatus::Revoked => ScanOutcome::REVOKED,
             $pass->status === PassStatus::Pending => ScanOutcome::NOT_REGISTERED,
@@ -102,10 +105,10 @@ class PassScanner
         };
 
         // Les données d'un pass ne sont jamais exposées à un agent non affecté à son événement.
-        return new ScanOutcome($reason === ScanOutcome::NOT_ASSIGNED ? null : $pass, $reason);
+        return new ScanOutcome(in_array($reason, [ScanOutcome::NOT_ASSIGNED, ScanOutcome::UNKNOWN_PASS], true) ? null : $pass, $reason);
     }
 
-    public function canForce(User $user, ScanOutcome $outcome): bool
+    public function canForce(ScanActor $user, ScanOutcome $outcome): bool
     {
         return $outcome->pass !== null
             && $outcome->isForceable()
@@ -114,11 +117,11 @@ class PassScanner
 
     /**
      * Enregistre un passage et met à jour la position du véhicule s'il est autorisé.
-     * $pass est null pour un QR code inconnu ou hors des événements de l'agent.
+     * $pass est null pour un QR code inconnu ou hors des événements de l'auteur (agent ou partenaire).
      *
-     * @param  array{direction?: ?Direction, method?: ScanMethod, reason?: ?string, forced?: bool, offline?: bool, device_id?: ?string, latitude?: ?float, longitude?: ?float, location_accuracy?: ?int, client_uuid?: ?string, scanned_at?: ?Carbon}  $attributes
+     * @param  array{direction?: ?Direction, method?: ScanMethod, reason?: ?string, forced?: bool, offline?: bool, device_id?: ?string, latitude?: ?float, longitude?: ?float, location_accuracy?: ?int, client_uuid?: ?string, idempotency_key?: ?string, operator_ref?: ?string, scanned_at?: ?Carbon}  $attributes
      */
-    public function record(User $agent, ?Pass $pass, ScanResult $result, array $attributes = []): Scan
+    public function record(ScanActor $agent, ?Pass $pass, ScanResult $result, array $attributes = []): Scan
     {
         return DB::transaction(function () use ($agent, $pass, $result, $attributes) {
             if ($pass) {
@@ -131,7 +134,9 @@ class PassScanner
             $scan = Scan::create([
                 'event_id' => $pass?->event_id,
                 'pass_id' => $pass?->id,
-                'user_id' => $agent->id,
+                'user_id' => $agent instanceof User ? $agent->id : null,
+                'partner_id' => $agent instanceof Partner ? $agent->id : null,
+                'operator_ref' => $attributes['operator_ref'] ?? null,
                 'direction' => $direction,
                 'result' => $result,
                 'method' => $attributes['method'] ?? ScanMethod::Qr,
@@ -143,6 +148,7 @@ class PassScanner
                 'longitude' => $attributes['longitude'] ?? null,
                 'location_accuracy' => isset($attributes['location_accuracy']) ? (int) round($attributes['location_accuracy']) : null,
                 'client_uuid' => $attributes['client_uuid'] ?? null,
+                'idempotency_key' => $attributes['idempotency_key'] ?? null,
                 'scanned_at' => $scannedAt,
             ]);
 

@@ -21,7 +21,7 @@
                 <th class="px-5 py-2 font-medium">Sens</th>
                 <th class="px-5 py-2 font-medium">Résultat</th>
                 @if ($showAgent)
-                    <th class="px-5 py-2 font-medium">Agent</th>
+                    <th class="px-5 py-2 font-medium">Agent / opérateur</th>
                 @endif
                 <th class="px-5 py-2 font-medium">Position</th>
                 @if ($canDelete)
@@ -57,7 +57,9 @@
                     </td>
                     @if ($showAgent)
                         <td class="whitespace-nowrap px-5 py-2 text-slate-600">
-                            @if ($scan->agent && auth()->user()->can('admin'))
+                            @if ($scan->partner_id)
+                                <span class="rounded-full bg-sky-100 px-2 py-0.5 text-xs font-medium text-sky-800" title="Passage enregistré via l'API partenaire">{{ $scan->operatorName() }}</span>
+                            @elseif ($scan->agent && auth()->user()->can('admin'))
                                 <a href="{{ route('users.scans', $scan->agent) }}" class="hover:text-indigo-600 hover:underline">{{ $scan->agent->name }}</a>
                             @else
                                 {{ $scan->agent?->name ?? '—' }}

@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\AjaxRedirects;
+use App\Http\Middleware\AuthenticatePartner;
 use App\Http\Middleware\EnsureApiDocsEnabled;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Services\AuditLogger;
@@ -21,6 +22,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->alias([
             'active' => EnsureUserIsActive::class,
             'api-docs' => EnsureApiDocsEnabled::class,
+            'partner' => AuthenticatePartner::class,
         ]);
 
         $middleware->web(append: [

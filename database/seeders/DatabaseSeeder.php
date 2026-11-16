@@ -17,15 +17,16 @@ class DatabaseSeeder extends Seeder
     {
         $this->call(BrandSeeder::class);
 
-        $admin = User::updateOrCreate(['email' => 'admin@passparking.test'], [
-            'name' => 'Administrateur',
-            'password' => 'password',
-            'role' => UserRole::Admin,
-        ]);
+        // Le propriétaire existant est mis à jour (même si son email change) ; sinon il est créé.
+        $admin = User::where('is_owner', true)->first()
+            ?? User::firstOrNew(['email' => config('parking.admin.email')]);
 
-        if (! User::where('is_owner', true)->exists()) {
-            $admin->forceFill(['is_owner' => true])->save();
-        }
+        $admin->fill([
+            'name' => $admin->name ?? 'Administrateur',
+            'email' => config('parking.admin.email'),
+            'password' => config('parking.admin.password'),
+            'role' => UserRole::Admin,
+        ])->forceFill(['is_owner' => true, 'is_active' => true])->save();
 
         if (! app()->isLocal()) {
             return;

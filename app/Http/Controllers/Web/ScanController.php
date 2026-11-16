@@ -15,7 +15,7 @@ class ScanController extends Controller
     public function index(Request $request, Event $event): View
     {
         $scans = $event->scans()
-            ->with(['agent', 'pass.vehicle', 'pass.type'])
+            ->with(['agent', 'partner', 'pass.vehicle', 'pass.type'])
             ->when($request->result, fn ($query, $result) => $query->where('result', $result))
             ->when($request->direction, fn ($query, $direction) => $query->where('direction', $direction))
             ->when($request->agent, fn ($query, $agent) => $query->where('user_id', $agent))

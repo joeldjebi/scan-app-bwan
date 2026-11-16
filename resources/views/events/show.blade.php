@@ -170,6 +170,52 @@
         </section>
     </div>
 
+    {{-- Partenaires API --}}
+    <section class="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
+        <div class="border-b border-slate-200 px-5 py-3">
+            <h2 class="font-semibold">Partenaires autorisés à scanner</h2>
+            <p class="text-xs text-slate-500">Entités extérieures qui scannent les pass de cet événement via l'API partenaire. Leurs passages mettent à jour la présence des véhicules.</p>
+        </div>
+        <ul class="divide-y divide-slate-100">
+            @forelse ($event->partners as $partner)
+                <li class="flex items-center justify-between gap-2 px-5 py-3">
+                    <div>
+                        @can('admin')
+                            <a href="{{ route('partners.show', $partner) }}" class="text-sm font-medium hover:text-indigo-600 hover:underline">{{ $partner->name }}</a>
+                        @else
+                            <p class="text-sm font-medium">{{ $partner->name }}</p>
+                        @endcan
+                        <p class="text-xs text-slate-500">Accès depuis le {{ $partner->pivot->created_at?->translatedFormat('d M Y') }}@unless ($partner->is_active) · <span class="font-medium text-red-700">suspendu</span>@endunless</p>
+                    </div>
+                    <form method="POST" action="{{ route('events.partners.destroy', [$event, $partner]) }}" onsubmit="return confirm('Retirer l\'accès de {{ $partner->name }} à cet événement ?')">
+                        @csrf @method('DELETE')
+                        <button class="text-xs text-red-600 hover:underline">Retirer l'accès</button>
+                    </form>
+                </li>
+            @empty
+                <li class="px-5 py-6 text-sm text-slate-500">Aucun partenaire n'a accès à cet événement.</li>
+            @endforelse
+        </ul>
+        @if ($availablePartners->isNotEmpty())
+            <form method="POST" action="{{ route('events.partners.store', $event) }}" class="flex flex-wrap gap-2 border-t border-slate-200 bg-slate-50 px-5 py-4">
+                @csrf
+                <select name="partner_id" required class="{{ $input }} min-w-0 flex-1">
+                    <option value="">Choisir un partenaire…</option>
+                    @foreach ($availablePartners as $partner)
+                        <option value="{{ $partner->id }}">{{ $partner->name }}</option>
+                    @endforeach
+                </select>
+                <button class="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800">Donner l'accès</button>
+            </form>
+        @else
+            @can('admin')
+                <p class="border-t border-slate-200 px-5 py-3 text-xs text-slate-500">
+                    Aucun autre partenaire actif. <a href="{{ route('partners.create') }}" class="text-indigo-600 hover:underline">Créer un partenaire</a>
+                </p>
+            @endcan
+        @endif
+    </section>
+
     <section class="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
         <div class="flex items-center justify-between border-b border-slate-200 px-5 py-3">
             <h2 class="font-semibold">Derniers passages</h2>

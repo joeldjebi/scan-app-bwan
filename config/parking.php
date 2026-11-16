@@ -15,6 +15,15 @@ return [
     // Nombre maximum de pass générés en une seule opération.
     'max_generation' => 5000,
 
+    // Identifiants du compte administrateur propriétaire créé ou mis à jour par le seeder.
+    'admin' => [
+        'email' => env('ADMIN_EMAIL', 'admin@passparking.test'),
+        'password' => env('ADMIN_PASSWORD', 'password'),
+    ],
+
+    // API partenaire : requêtes par minute et par clé API.
+    'partner_rate_limit' => (int) env('PARTNER_RATE_LIMIT', 120),
+
     // Documentation Swagger publique sur /docs/api.
     'api_docs' => env('API_DOCS_ENABLED', true),
 

@@ -17,7 +17,7 @@ php artisan storage:link        # logos et affiches des événements
 php artisan serve
 ```
 
-Le seeder crée `admin@passparking.test` / `password`, plus des données de démo en local (chef `chef@passparking.test`, agents `awa|moussa|fatou@passparking.test`, mot de passe `password`).
+Le seeder crée ou met à jour le compte propriétaire avec `ADMIN_EMAIL` / `ADMIN_PASSWORD` (`.env`, par défaut `admin@passparking.test` / `password`), plus des données de démo en local (chef `chef@passparking.test`, agents `awa|moussa|fatou@passparking.test`, mot de passe `password`).
 
 > ⚠️ Définir le bon `APP_URL` **avant** d'exporter et d'imprimer les QR codes.
 

@@ -1,0 +1,601 @@
+openapi: 3.0.3
+
+info:
+  title: Pass Parking — API partenaires
+  version: 1.0.0
+  description: |
+    API destinée aux **entités extérieures** (sociétés de sécurité, gestionnaires de parking, organisateurs
+    associés…) autorisées à **scanner les pass parking** émis par Pass Parking.
+
+    Un partenaire peut :
+    1. **vérifier** un pass (QR code ou immatriculation) ;
+    2. **enregistrer** une entrée ou une sortie : la présence du véhicule est mise à jour, comme pour un
+       agent Pass Parking ;
+    3. consulter **l'historique de ses propres passages**.
+
+    ---
+
+    ## 1. Authentification
+
+    Chaque requête porte une **clé API** fournie par Pass Parking :
+
+    ```
+    Authorization: Bearer ppk_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    ```
+
+    (ou l'en-tête `X-Api-Key: ppk_…`). La clé n'est affichée **qu'une seule fois** à sa création :
+    conservez-la côté serveur, jamais dans une application publique ni dans un dépôt de code.
+
+    Une clé porte des **droits** : `scans:verify`, `scans:write`, `scans:read`. Elle peut avoir une date
+    d'expiration et une liste d'adresses IP autorisées. Pour changer de clé sans coupure, demandez une
+    nouvelle clé, déployez-la, puis faites révoquer l'ancienne.
+
+    ## 2. Périmètre
+
+    Le partenaire n'accède qu'aux **événements qui lui ont été ouverts** (`GET /events`). Un pass d'un
+    autre événement est traité comme **inconnu** (`unknown_pass`) : aucune donnée n'est révélée.
+    Le téléphone de l'usager n'est jamais transmis. Un partenaire **ne peut pas forcer** un passage refusé.
+
+    ## 3. Parcours d'un contrôle
+
+    ```
+    Scan du QR code (contenu brut : URL complète ou jeton)
+         │
+         ▼
+    POST /verify ──► valid = false ──► refus : afficher `message`
+         │                             (facultatif : POST /scans { result: denied } pour tracer le refus)
+         │ valid = true
+         ▼
+    Contrôle visuel : immatriculation, marque, couleur, type de pass, sens prévu (next_direction)
+         │
+         ▼
+    POST /scans  (en-tête Idempotency-Key recommandé) ──► 201 : passage enregistré, présence mise à jour
+    ```
+
+    ## 4. Idempotence
+
+    Envoyez un en-tête `Idempotency-Key` unique par passage (UUID conseillé). Si la requête est renvoyée
+    (coupure réseau, nouvel essai), la réponse est le passage déjà enregistré (`200`) : aucun doublon.
+
+    ## 5. Quotas
+
+    120 requêtes par minute et par clé (par défaut). Au-delà : `429` avec l'en-tête `Retry-After`.
+
+    ## 6. Webhooks
+
+    Si une URL de webhook est configurée, Pass Parking envoie un `POST` JSON à chaque changement utile
+    sur les événements du partenaire :
+
+    | Type            | Quand                                   |
+    |-----------------|-----------------------------------------|
+    | `pass.revoked`  | un pass est révoqué (à refuser)         |
+    | `pass.restored` | un pass révoqué est réactivé            |
+    | `ping`          | test envoyé depuis le back-office       |
+
+    ```json
+    {
+      "id": "8d0f4f3e-1c1b-4c55-9d43-0f4f1c7b2a10",
+      "type": "pass.revoked",
+      "created_at": "2026-11-16T10:12:00+00:00",
+      "data": {
+        "event": { "id": 12, "name": "Festival Abidjan 2026" },
+        "pass": { "number": "FAB-VIP-0042", "status": "revoked", "type": "VIP", "plate": "1234 AB 01" }
+      }
+    }
+    ```
+
+    **Signature** : l'en-tête `X-PassParking-Signature: t=<timestamp>,v1=<signature>` contient
+    `HMAC-SHA256(secret, "<timestamp>.<corps brut>")` en hexadécimal. Vérifiez-la avec le secret de webhook
+    fourni par Pass Parking (comparaison à temps constant) et rejetez un `timestamp` de plus de 5 minutes.
+    `X-PassParking-Delivery` identifie l'envoi (identique au champ `id`) : ignorez un envoi déjà traité.
+
+    Répondez `2xx` rapidement. Sinon l'envoi est réessayé jusqu'à 6 fois (30 s, 2 min, 10 min, 30 min, 1 h).
+
+    ## 7. Conventions
+
+    - **Dates** : ISO 8601 UTC en sortie ; en entrée, tout ISO 8601.
+    - **Erreurs** : `message` lisible et `code` stable à utiliser dans votre code
+      (`invalid_api_key`, `ip_not_allowed`, `insufficient_scope`, `rate_limited`, `not_found`, ou un motif de refus).
+
+  contact:
+    name: Équipe Pass Parking
+
+servers:
+  - url: /api/partner/v1
+
+security:
+  - apiKey: []
+
+tags:
+  - name: Événements
+  - name: Scan
+  - name: Historique
+
+paths:
+  /events:
+    get:
+      tags: [Événements]
+      summary: Événements ouverts au partenaire
+      operationId: listEvents
+      responses:
+        '200':
+          description: Événements sur lesquels le partenaire peut scanner.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Event'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /verify:
+    post:
+      tags: [Scan]
+      summary: Vérifier un pass (n'enregistre rien)
+      description: Droit requis `scans:verify`.
+      operationId: verifyPass
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Identification'
+      responses:
+        '200':
+          description: Résultat de la vérification.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Verification'
+              examples:
+                valide:
+                  value:
+                    valid: true
+                    reason: null
+                    message: Pass valide.
+                    method: qr
+                    pass:
+                      number: FAB-VIP-0042
+                      status: registered
+                      status_label: Enregistré
+                      presence: out
+                      next_direction: in
+                      type: { name: VIP, code: VIP, color: '#b45309' }
+                      vehicle: { plate: 1234 AB 01, brand: Toyota, color: Blanc }
+                      event: { id: 12, name: Festival Abidjan 2026 }
+                      last_scanned_at: null
+                    matches: []
+                inconnu:
+                  value:
+                    valid: false
+                    reason: unknown_pass
+                    message: QR code inconnu.
+                    method: qr
+                    pass: null
+                    matches: []
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /scans:
+    post:
+      tags: [Scan]
+      summary: Enregistrer une entrée ou une sortie
+      description: |
+        Droit requis `scans:write`. Sans `direction`, le sens est déduit de la position du véhicule.
+        Un passage validé (`result = granted`) met à jour la présence du véhicule. `result = denied`
+        trace un refus sans modifier la présence.
+      operationId: recordScan
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Identifiant unique du passage (UUID conseillé), pour pouvoir renvoyer la requête sans doublon.
+          schema:
+            type: string
+            maxLength: 100
+          example: 5f0c2a3e-0d9b-4bfa-9a55-6a1e0cbb1b7e
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ScanRequest'
+            example:
+              code: https://passparking.example.com/p/Ab12Cd34Ef56
+              operator_ref: AGENT-07
+              device_id: TAB-ENTREE-NORD
+              latitude: 5.3197012
+              longitude: -4.0167293
+              accuracy: 12
+      responses:
+        '201':
+          description: Passage enregistré.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanRecorded'
+        '200':
+          description: Passage déjà enregistré (même `Idempotency-Key`, ou même passage renvoyé il y a moins de 10 secondes).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanRecorded'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          description: Pass non valide (le passage ne peut pas être validé) ou données invalides.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                message: Ce pass a été révoqué.
+                code: revoked
+                matches: []
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+    get:
+      tags: [Historique]
+      summary: Historique des passages du partenaire
+      description: Droit requis `scans:read`. Du plus récent au plus ancien, pagination par curseur.
+      operationId: listScans
+      parameters:
+        - { name: event, in: query, schema: { type: integer }, description: Identifiant d'événement. }
+        - { name: from, in: query, schema: { type: string }, description: 'Date ou date-heure de début (ISO 8601).' }
+        - { name: to, in: query, schema: { type: string }, description: 'Date de fin (incluse).' }
+        - { name: result, in: query, schema: { $ref: '#/components/schemas/ScanResult' } }
+        - { name: direction, in: query, schema: { $ref: '#/components/schemas/Direction' } }
+        - { name: operator_ref, in: query, schema: { type: string }, description: Passages d'un de vos opérateurs. }
+        - { name: per_page, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
+        - { name: cursor, in: query, schema: { type: string }, description: Curseur fourni par `links.next` / `links.prev`. }
+      responses:
+        '200':
+          description: Page de passages et cumul correspondant aux filtres.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [summary, data, links, meta]
+                properties:
+                  summary:
+                    type: object
+                    required: [total, entries, exits, denied]
+                    properties:
+                      total: { type: integer, example: 128 }
+                      entries: { type: integer, example: 70 }
+                      exits: { type: integer, example: 55 }
+                      denied: { type: integer, example: 3 }
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Scan'
+                  links:
+                    type: object
+                    required: [next, prev]
+                    properties:
+                      next: { type: string, nullable: true }
+                      prev: { type: string, nullable: true }
+                  meta:
+                    type: object
+                    required: [per_page]
+                    properties:
+                      per_page: { type: integer, example: 50 }
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+  /scans/{scan}:
+    get:
+      tags: [Historique]
+      summary: Détail d'un passage du partenaire
+      description: Droit requis `scans:read`.
+      operationId: showScan
+      parameters:
+        - { name: scan, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: Passage.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [scan]
+                properties:
+                  scan:
+                    $ref: '#/components/schemas/Scan'
+        '401':
+          $ref: '#/components/responses/Unauthenticated'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: Passage inexistant ou enregistré par un autre auteur.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          $ref: '#/components/responses/TooManyRequests'
+
+components:
+  securitySchemes:
+    apiKey:
+      type: http
+      scheme: bearer
+      description: 'Clé API partenaire : `Authorization: Bearer ppk_…` (ou en-tête `X-Api-Key`).'
+
+  responses:
+    Unauthenticated:
+      description: Clé absente, invalide, expirée ou révoquée, ou partenaire suspendu.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Clé API absente, invalide, expirée ou révoquée.
+            code: invalid_api_key
+    Forbidden:
+      description: IP non autorisée (`ip_not_allowed`) ou droit manquant sur la clé (`insufficient_scope`).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Cette clé API n'a pas le droit « scans:write ».
+            code: insufficient_scope
+    ValidationFailed:
+      description: Données invalides.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: Le champ code est obligatoire quand plate n'est pas présent.
+            errors:
+              code: [Le champ code est obligatoire quand plate n'est pas présent.]
+    TooManyRequests:
+      description: Quota dépassé. Réessayez après le délai de l'en-tête `Retry-After` (secondes).
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            message: 'Trop de requêtes : réessayez plus tard.'
+            code: rate_limited
+
+  schemas:
+    Direction:
+      type: string
+      enum: [in, out]
+      description: '`in` = entrée / dans le parking, `out` = sortie / dehors.'
+
+    ScanResult:
+      type: string
+      enum: [granted, denied]
+      description: '`granted` = passage validé, `denied` = refus tracé.'
+
+    ScanMethod:
+      type: string
+      enum: [qr, plate]
+      description: '`qr` = QR code scanné, `plate` = immatriculation saisie.'
+
+    RefusalReason:
+      type: string
+      enum: [unknown_pass, event_closed, not_registered, revoked, unknown_plate, multiple_matches]
+      description: |
+        - `unknown_pass` : QR code inconnu (ou pass d'un événement non ouvert au partenaire)
+        - `event_closed` : événement clôturé
+        - `not_registered` : aucun véhicule enregistré sur le pass
+        - `revoked` : pass révoqué
+        - `unknown_plate` : immatriculation inconnue sur vos événements
+        - `multiple_matches` : immatriculation présente sur plusieurs de vos événements (voir `matches`)
+
+    Error:
+      type: object
+      required: [message]
+      properties:
+        message:
+          type: string
+        code:
+          type: string
+          nullable: true
+          description: Code stable de l'erreur ou motif de refus.
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+        matches:
+          type: array
+          items:
+            $ref: '#/components/schemas/Pass'
+
+    EventRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: integer, example: 12 }
+        name: { type: string, example: Festival Abidjan 2026 }
+
+    Event:
+      type: object
+      required: [id, name, code, location, starts_at, ends_at, status, is_open]
+      properties:
+        id: { type: integer, example: 12 }
+        name: { type: string, example: Festival Abidjan 2026 }
+        code: { type: string, example: FAB26 }
+        location: { type: string, nullable: true, example: Palais de la Culture }
+        starts_at: { type: string, format: date-time }
+        ends_at: { type: string, format: date-time }
+        status: { type: string, enum: [draft, active, closed] }
+        is_open:
+          type: boolean
+          description: '`false` si l''événement est clôturé : tous les scans sont refusés.'
+
+    Location:
+      type: object
+      required: [latitude, longitude, accuracy]
+      properties:
+        latitude: { type: number, format: double, example: 5.3197012 }
+        longitude: { type: number, format: double, example: -4.0167293 }
+        accuracy: { type: integer, nullable: true, description: Précision en mètres., example: 12 }
+
+    Pass:
+      type: object
+      required: [number, status, status_label, presence, next_direction, type, vehicle, event, last_scanned_at]
+      properties:
+        number: { type: string, example: FAB-VIP-0042 }
+        status: { type: string, enum: [pending, registered, revoked] }
+        status_label: { type: string, example: Enregistré }
+        presence:
+          allOf:
+            - $ref: '#/components/schemas/Direction'
+          description: Position actuelle du véhicule.
+        next_direction:
+          allOf:
+            - $ref: '#/components/schemas/Direction'
+          description: Sens du prochain passage.
+        type:
+          type: object
+          required: [name, code, color]
+          properties:
+            name: { type: string, example: VIP }
+            code: { type: string, example: VIP }
+            color: { type: string, example: '#b45309' }
+        vehicle:
+          type: object
+          nullable: true
+          required: [plate, brand, color]
+          properties:
+            plate: { type: string, example: 1234 AB 01 }
+            brand: { type: string, example: Toyota }
+            color: { type: string, example: Blanc }
+        event:
+          $ref: '#/components/schemas/EventRef'
+        last_scanned_at: { type: string, format: date-time, nullable: true }
+
+    Identification:
+      type: object
+      description: '`code` (contenu brut du QR code) ou `plate` (immatriculation, tout format).'
+      properties:
+        code: { type: string, maxLength: 500, nullable: true, example: https://passparking.example.com/p/Ab12Cd34Ef56 }
+        plate: { type: string, maxLength: 20, nullable: true, example: 1234 AB 01 }
+
+    Verification:
+      type: object
+      required: [valid, reason, message, method, pass, matches]
+      properties:
+        valid: { type: boolean }
+        reason:
+          allOf:
+            - $ref: '#/components/schemas/RefusalReason'
+          nullable: true
+        message: { type: string }
+        method:
+          $ref: '#/components/schemas/ScanMethod'
+        pass:
+          allOf:
+            - $ref: '#/components/schemas/Pass'
+          nullable: true
+        matches:
+          type: array
+          description: Pass candidats quand l'immatriculation existe sur plusieurs de vos événements.
+          items:
+            $ref: '#/components/schemas/Pass'
+
+    ScanRequest:
+      allOf:
+        - $ref: '#/components/schemas/Identification'
+        - type: object
+          properties:
+            result:
+              allOf:
+                - $ref: '#/components/schemas/ScanResult'
+              nullable: true
+              description: '`granted` par défaut.'
+            direction:
+              allOf:
+                - $ref: '#/components/schemas/Direction'
+              nullable: true
+              description: Déduit de la position du véhicule si absent.
+            reason: { type: string, maxLength: 255, nullable: true, description: Motif d'un refus. }
+            operator_ref: { type: string, maxLength: 100, nullable: true, description: Identifiant de votre agent. }
+            device_id: { type: string, maxLength: 100, nullable: true }
+            latitude: { type: number, nullable: true }
+            longitude: { type: number, nullable: true }
+            accuracy: { type: number, nullable: true }
+
+    Scan:
+      type: object
+      required: [id, direction, result, method, reason, reason_label, operator_ref, device_id, idempotency_key, scanned_at, location, event, pass]
+      properties:
+        id: { type: integer, example: 5821 }
+        direction:
+          $ref: '#/components/schemas/Direction'
+        result:
+          $ref: '#/components/schemas/ScanResult'
+        method:
+          $ref: '#/components/schemas/ScanMethod'
+        reason: { type: string, nullable: true, description: Code de refus ou motif saisi. }
+        reason_label: { type: string, nullable: true }
+        operator_ref: { type: string, nullable: true, example: AGENT-07 }
+        device_id: { type: string, nullable: true }
+        idempotency_key: { type: string, nullable: true }
+        scanned_at: { type: string, format: date-time }
+        location:
+          allOf:
+            - $ref: '#/components/schemas/Location'
+          nullable: true
+        event:
+          allOf:
+            - $ref: '#/components/schemas/EventRef'
+          nullable: true
+          description: '`null` pour un QR code inconnu.'
+        pass:
+          type: object
+          nullable: true
+          required: [number, plate, type]
+          properties:
+            number: { type: string }
+            plate: { type: string, nullable: true }
+            type:
+              type: object
+              required: [name, color]
+              properties:
+                name: { type: string }
+                color: { type: string }
+
+    ScanRecorded:
+      type: object
+      required: [scan, pass]
+      properties:
+        scan:
+          $ref: '#/components/schemas/Scan'
+        pass:
+          allOf:
+            - $ref: '#/components/schemas/Pass'
+          nullable: true

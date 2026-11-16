@@ -9,6 +9,7 @@ use App\Enums\ScanResult;
 use App\Enums\UserRole;
 use App\Http\Controllers\Controller;
 use App\Models\Event;
+use App\Models\Partner;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\EventCodeGenerator;
@@ -42,7 +43,7 @@ class EventController extends Controller
             'passes',
             'passes as registered_count' => fn ($q) => $q->where('status', PassStatus::Registered),
             'passes as inside_count' => fn ($q) => $q->where('presence', Direction::In),
-        ]), 'staff']);
+        ]), 'staff', 'partners' => fn ($query) => $query->orderBy('name')]);
 
         // Deux requêtes agrégées au lieu de six comptages séparés.
         $passStats = $event->passes()->toBase()->selectRaw('count(*) as total')
@@ -71,9 +72,14 @@ class EventController extends Controller
             ->orderBy('name')
             ->get();
 
-        $recentScans = $event->scans()->with(['agent', 'pass.vehicle', 'pass.type'])->latest('scanned_at')->limit(10)->get();
+        $availablePartners = Partner::where('is_active', true)
+            ->whereNotIn('id', $event->partners->pluck('id'))
+            ->orderBy('name')
+            ->get();
 
-        return view('events.show', compact('event', 'stats', 'availableAgents', 'recentScans'));
+        $recentScans = $event->scans()->with(['agent', 'partner', 'pass.vehicle', 'pass.type'])->latest('scanned_at')->limit(10)->get();
+
+        return view('events.show', compact('event', 'stats', 'availableAgents', 'availablePartners', 'recentScans'));
     }
 
     public function edit(Event $event): View

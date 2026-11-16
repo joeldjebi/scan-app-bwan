@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>API · {{ config('app.name') }}</title>
+    <title>{{ $title }} · {{ config('app.name') }}</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui.css">
     <style>
         body { margin: 0; background: #fff; }
@@ -13,15 +13,15 @@
 </head>
 <body>
     <div class="topbar-pp">
-        <strong>{{ config('app.name') }} — API mobile v1</strong>
-        <a href="{{ route('api-docs.spec', absolute: false) }}" download="openapi.yaml">Télécharger openapi.yaml</a>
+        <strong>{{ config('app.name') }} — {{ $title }}</strong>
+        <a href="{{ $specUrl }}" download="openapi.yaml">Télécharger openapi.yaml</a>
     </div>
     <div id="swagger-ui"></div>
 
     <script src="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5.17.14/swagger-ui-bundle.js"></script>
     <script>
         window.ui = SwaggerUIBundle({
-            url: @js(route('api-docs.spec', absolute: false)),
+            url: @js($specUrl),
             dom_id: '#swagger-ui',
             deepLinking: true,
             persistAuthorization: true,
